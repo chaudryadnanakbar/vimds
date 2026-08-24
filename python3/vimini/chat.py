@@ -6,16 +6,10 @@ from vimini.code import _DIFF_SEPARATOR, _process_x_diff_chunks
 
 WAITING_MSG = "Waiting for prompt (CTRL-W q to exit)"
 WELCOME_MSG = "Welcome to Vimini! Waiting for prompt (CTRL-W q to exit)"
+HINT_MSG = "Press Enter twice to submit prompt"
 
 Q_prefix = "Q: "
 A_prefix = "A: "
-
-SPECIAL_MAP_KEYS = {
-    '<': '<LT>',
-    '|': '<Bar>',
-    '\\': '<Bslash>',
-    ' ': '<Space>'
-}
 
 def _to_str(val):
     if isinstance(val, bytes):
@@ -33,78 +27,157 @@ def _get_buffer(buf_num):
                 break
     return buffer
 
-def _display_send_buffer(buffer):
+def _find_chat_buffer(req_id):
+    if not req_id:
+        return None
     try:
-        if buffer.vars.get('vimini_waiting', False):
+        for b in vim.buffers:
+            job_id = b.vars.get("vimini_job_id")
+            if job_id is not None and _to_str(job_id) == str(req_id):
+                return b
+    except Exception:
+        pass
+    return None
+
+def _prompt_window_exists(req_id=None):
+    for w in vim.windows:
+        try:
+            if w.buffer.name and os.path.basename(w.buffer.name) == "Prompt":
+                if req_id is not None:
+                    p_req = _to_str(w.buffer.vars.get("vimini_prompt_req_id", ""))
+                    if not p_req or p_req == str(req_id):
+                        return True
+                else:
+                    return True
+        except Exception:
+            pass
+    return False
+
+def _check_prompt_buffer(buf_num):
+    try:
+        prompt_buf = _get_buffer(buf_num)
+        if prompt_buf is None:
             return
-        prompt_str = _to_str(buffer.vars.get('vimini_send_buffer', ''))
-        msg = f"Prompt: {prompt_str}"
-        safe_msg = msg.replace("'", "''")
-        vim.command("redraw")
-        vim.command(f"echo '{safe_msg}'")
+
+        if bool(prompt_buf.vars.get("vimini_submitting", False)):
+            return
+
+        lines = list(prompt_buf[:])
+        if lines and lines[0].strip() == HINT_MSG:
+            lines = lines[1:]
+
+        has_text = False
+        for i, line in enumerate(lines):
+            if line.strip():
+                has_text = True
+            elif has_text:
+                if i < len(lines) - 1:
+                    prompt_text = "\n".join(lines[:i]).strip()
+                    if prompt_text:
+                        prompt_buf.vars["vimini_submitting"] = True
+                        submit_prompt(buf_num, prompt_text=prompt_text)
+                    return
     except Exception as e:
-        util.log_info(f"Error displaying send buffer: {e}")
+        util.log_info(f"Error in _check_prompt_buffer: {e}")
 
-def _on_key_code(buf_num, code=None):
-    if code is None:
-        return
+def _open_prompt_window(req_id):
+    try:
+        chat_buf = _find_chat_buffer(req_id)
+        if not chat_buf:
+            return
 
+        if vim.current.buffer.number != chat_buf.number:
+            return
+
+        for b in vim.buffers:
+            if b.name and os.path.basename(b.name) == "Prompt":
+                try:
+                    vim.command(f"bwipeout! {b.number}")
+                except Exception:
+                    pass
+
+        vim.command("belowright 5new")
+        prompt_buf = vim.current.buffer
+        prompt_buf_num = prompt_buf.number
+
+        vim.command("silent! file Prompt")
+        prompt_buf.options["buftype"] = "nofile"
+        prompt_buf.options["bufhidden"] = "wipe"
+        prompt_buf.options["swapfile"] = False
+        prompt_buf.options["modifiable"] = True
+
+        prompt_buf.vars["vimini_prompt_req_id"] = req_id
+        prompt_buf.vars["vimini_submitting"] = False
+
+        if chat_buf:
+            chat_buf.vars["vimini_prompt_buf_num"] = prompt_buf_num
+
+        prompt_buf[:] = [HINT_MSG, ""]
+
+        vim.command("highlight default ViminiPromptHint ctermfg=Green guifg=Green cterm=italic gui=italic")
+        vim.command("syntax match ViminiPromptHint '^Press Enter twice to submit prompt$'")
+
+        vim.command(f"autocmd TextChanged,TextChangedI,TextChangedP,InsertLeave <buffer> py3 from vimini.chat import _check_prompt_buffer; _check_prompt_buffer({prompt_buf_num})")
+
+        vim.current.window.cursor = (2, 0)
+        vim.command("startinsert")
+    except Exception as e:
+        util.log_info(f"Error opening prompt window: {e}")
+
+def _on_chat_buf_enter(buf_num):
     try:
         buffer = _get_buffer(buf_num)
-        if buffer is None or buffer.vars.get('vimini_waiting', False):
+        if buffer is None:
             return
-        curr = _to_str(buffer.vars.get('vimini_send_buffer', ''))
-        buffer.vars['vimini_send_buffer'] = curr + chr(code)
-        _display_send_buffer(buffer)
+        if vim.current.buffer.number != buffer.number:
+            return
+        is_waiting = bool(buffer.vars.get("vimini_waiting", False))
+        if is_waiting:
+            return
+        req_id = _to_str(buffer.vars.get("vimini_job_id", ""))
+        if not req_id:
+            return
+        if not _prompt_window_exists(req_id):
+            _open_prompt_window(req_id)
     except Exception as e:
-        util.log_info(f"Error handling key code: {e}")
+        util.log_info(f"Error in _on_chat_buf_enter: {e}")
 
-def _on_backspace(buf_num):
+def submit_prompt(prompt_buf_num=None, prompt_text=None):
     try:
-        buffer = _get_buffer(buf_num)
-        if buffer is None or buffer.vars.get('vimini_waiting', False):
-            return
-        curr = _to_str(buffer.vars.get('vimini_send_buffer', ''))
-        if curr:
-            buffer.vars['vimini_send_buffer'] = curr[:-1]
-            _display_send_buffer(buffer)
-    except Exception as e:
-        util.log_info(f"Error handling backspace: {e}")
-
-def _on_enter(buf_num):
-    try:
-        buffer = _get_buffer(buf_num)
-        if buffer is None or buffer.vars.get('vimini_waiting', False):
-            return
-        prompt = _to_str(buffer.vars.get('vimini_send_buffer', ''))
-        buffer.vars['vimini_send_buffer'] = ""
-        _display_send_buffer(buffer)
-        if prompt.strip():
-            _send_prompt(prompt, buffer)
-    except Exception as e:
-        util.log_info(f"Error handling enter: {e}")
-
-def _enable_chat_mappings(buf_num):
-    vim.command(f"nnoremap <buffer> <silent> <CR> :py3 from vimini.chat import _on_enter; _on_enter({buf_num})<CR>")
-    vim.command(f"nnoremap <buffer> <silent> <BS> :py3 from vimini.chat import _on_backspace; _on_backspace({buf_num})<CR>")
-    vim.command(f"nnoremap <buffer> <silent> <Del> :py3 from vimini.chat import _on_backspace; _on_backspace({buf_num})<CR>")
-
-    for code in range(32, 127):
-        ch = chr(code)
-        if ch in SPECIAL_MAP_KEYS:
-            lhs = SPECIAL_MAP_KEYS[ch]
+        util.log_info(f"Submit prompt {prompt_buf_num}")
+        if prompt_buf_num is None:
+            prompt_buf = vim.current.buffer
         else:
-            lhs = ch
-        vim.command(f"nnoremap <buffer> <silent> {lhs} :py3 from vimini.chat import _on_key_code; _on_key_code({buf_num},{code})<CR>")
+            prompt_buf = _get_buffer(prompt_buf_num)
 
-def _on_buf_enter(*args):
-    try:
-        buffer = vim.current.buffer
-        if not buffer.vars.get('vimini_waiting', False):
-            _enable_chat_mappings(buffer.number)
-        _display_send_buffer(buffer)
+        if prompt_buf is None:
+            return
+
+        req_id = _to_str(prompt_buf.vars.get("vimini_prompt_req_id", ""))
+        chat_buf = _find_chat_buffer(req_id)
+
+        if prompt_text is not None:
+            prompt = prompt_text.strip()
+        else:
+            content = "\n".join(prompt_buf[:])
+            lines = [l for l in content.split('\n') if l.strip() != HINT_MSG]
+            prompt = "\n".join(lines).strip()
+
+        vim.command("stopinsert")
+        try:
+            vim.command(f"bwipeout! {prompt_buf.number}")
+        except Exception as e:
+            util.log_info(f"Error closing prompt buffer: {e}")
+
+        if not prompt:
+            if chat_buf:
+                _open_prompt_window(req_id)
+            return
+
+        if chat_buf:
+            _send_prompt(prompt, chat_buf)
     except Exception as e:
-        util.log_info(f"failed to handle _on_buf_enter: {e}")
+        util.log_info(f"Error submitting prompt: {e}")
 
 def send_agent_approval(approved, req_id):
     req = {
@@ -131,11 +204,34 @@ def send_chat_termination(req_id):
 def _on_chat_buffer_closed(buf_num):
     try:
         buffer = _get_buffer(buf_num)
-        if buffer is None:
-            return
-        buffer.vars["vimini_waiting"] = False
-        req_id = _to_str(buffer.vars.get("vimini_job_id", ""))
-        send_chat_termination(req_id)
+        req_id = ""
+        prompt_buf_num = None
+        if buffer is not None:
+            buffer.vars["vimini_waiting"] = False
+            req_id = _to_str(buffer.vars.get("vimini_job_id", ""))
+            prompt_buf_num = buffer.vars.get("vimini_prompt_buf_num")
+
+        prompt_buffers = []
+        if prompt_buf_num:
+            prompt_buffers.append(prompt_buf_num)
+
+        for b in vim.buffers:
+            try:
+                if b.name and os.path.basename(b.name) == "Prompt":
+                    p_req = _to_str(b.vars.get("vimini_prompt_req_id", ""))
+                    if not req_id or p_req == req_id:
+                        prompt_buffers.append(b.number)
+            except Exception:
+                pass
+
+        for p_num in set(prompt_buffers):
+            try:
+                vim.command(f"bwipeout! {p_num}")
+            except Exception:
+                pass
+
+        if req_id:
+            send_chat_termination(req_id)
         util.display_message("Chat session has been terminated.", history=True)
     except Exception as e:
         util.log_info(f"Error in _on_chat_buffer_closed: {e}")
@@ -230,11 +326,11 @@ def _open_patch_buffer(temp_file, req_id):
         base_buffer_name = f"[{req_id}] Vimini Code"
         safe_name = base_buffer_name.replace(" ", "\\ ")
         vim.command(f"file {safe_name}")
-        vim.command("setlocal buftype=nofile")
-        vim.command("setlocal bufhidden=wipe")
-        vim.command("setlocal noswapfile")
-
         buffer = vim.current.buffer
+        buffer.options["buftype"] = "nofile"
+        buffer.options["bufhidden"] = "wipe"
+        buffer.options["swapfile"] = 0
+
         buffer.vars["vimini_project_root"] = project_root
         buffer.vars["vimini_chat_job_id"] = req_id
         buffer.vars["vimini_is_chat_patch"] = 1
@@ -256,7 +352,7 @@ def _open_patch_buffer(temp_file, req_id):
 
         buffer[:] = summary_lines + diff_content.splitlines()
 
-        vim.command("setlocal filetype=diff")
+        buffer.options["filetype"] = "diff"
         vim.command(f"autocmd BufUnload <buffer> py3 from vimini.chat import _on_patch_buffer_closed; _on_patch_buffer_closed({req_id})")
 
         util.display_message("Patch buffer opened. Run :ViminiApply to apply changes.", history=True)
@@ -266,17 +362,7 @@ def _open_patch_buffer(temp_file, req_id):
 
 def handle_channel_response(req_id, result):
     status = result.get("status")
-
-    buffer = None
-    try:
-        for b in vim.buffers:
-            job_id = b.vars.get("vimini_job_id")
-            if job_id is not None and _to_str(job_id) == req_id:
-                buffer = b
-                break
-    except Exception:
-        util.display_message("Error handling channel response")
-        return
+    buffer = _find_chat_buffer(req_id)
 
     if buffer is None:
         return
@@ -314,9 +400,8 @@ def handle_channel_response(req_id, result):
         text = result.get("text", "")
         if text:
             _write_to_buffer(buffer, text, append_to_last=True)
-        if vim.current.buffer.number == buffer.number:
-            _write_to_buffer(buffer, ["", WAITING_MSG])
-            _display_send_buffer(buffer)
+        _write_to_buffer(buffer, ["", WAITING_MSG])
+        _open_prompt_window(req_id)
 
     elif status == "terminated":
         buffer.vars["vimini_waiting"] = False
@@ -325,8 +410,7 @@ def handle_channel_response(req_id, result):
         buffer.vars["vimini_waiting"] = False
         err_msg = result.get("error", "Unknown error")
         _write_to_buffer(buffer, [f"\n[Error: {err_msg}]", "", WAITING_MSG])
-        if vim.current.buffer.number == buffer.number:
-            _display_send_buffer(buffer)
+        _open_prompt_window(req_id)
 
 def _send_prompt(prompt, buffer):
     if prompt.startswith(":"):
@@ -371,6 +455,7 @@ def _send_prompt(prompt, buffer):
     if not util.send_channel_request(req, False):
         buffer.vars["vimini_waiting"] = False
         _write_to_buffer(buffer, ["", "[Error: Agent channel is not open]", "", WAITING_MSG])
+        _open_prompt_window(_to_str(buffer.vars.get("vimini_job_id", "")))
     else:
         util.display_message("Command has been sent and waiting for chat response")
 
@@ -384,8 +469,11 @@ def chat():
     vim.command(f"file {buffer_name}")
     util.log_info(f"New chat in buffer <{buffer_name}>")
 
-    vim.command('setlocal buftype=nofile filetype=markdown noswapfile')
-    vim.command('setlocal nomodifiable')
+    buffer.options["buftype"] = "nofile"
+    buffer.options["bufhidden"] = "wipe"
+    buffer.options["filetype"] = "markdown"
+    buffer.options["swapfile"] = 0
+    buffer.options["modifiable"] = 0
     vim.command("highlight default ViminiWaiting ctermfg=Green guifg=Green")
     vim.command("highlight default ViminiPrompt ctermfg=DarkBlue guifg=DarkBlue")
     vim.command("highlight default ViminiService ctermfg=Green guifg=Green cterm=italic gui=italic")
@@ -393,19 +481,15 @@ def chat():
     vim.command("syntax match ViminiPrompt '^Q: .*'")
     vim.command("syntax match ViminiService '^Agent Requested: .*'")
     vim.command(f"autocmd BufUnload <buffer> py3 from vimini.chat import _on_chat_buffer_closed; _on_chat_buffer_closed({buf_num})")
-    vim.command(f"autocmd BufEnter <buffer> py3 from vimini.chat import _on_buf_enter; _on_buf_enter({buf_num})")
+    vim.command(f"autocmd BufEnter <buffer> py3 from vimini.chat import _on_chat_buf_enter; _on_chat_buf_enter({buf_num})")
 
     buffer.vars["vimini_job_id"] = req_id
-    buffer.vars["vimini_send_buffer"] = ""
     buffer.vars["vimini_waiting"] = False
 
-    _enable_chat_mappings(buf_num)
     _write_to_buffer(buffer, [WELCOME_MSG], clear=True)
-    _display_send_buffer(buffer)
+    _open_prompt_window(req_id)
 
 def _write_to_buffer(buffer, content, clear=False, append_to_last=False):
-
-    #vim.command(f"call setbufvar({buffer.number}, '&modifiable', 1)")
     buffer.options["modifiable"] = 1
     try:
         if clear:
@@ -427,11 +511,24 @@ def _write_to_buffer(buffer, content, clear=False, append_to_last=False):
                     content = content.split('\n')
                 buffer.append(content)
 
-        if vim.current.buffer.number == buffer.number:
-            vim.command("normal! G")
+        chat_win_nr = None
+        curr_win_nr = None
+        for w in vim.windows:
+            if w.buffer.number == buffer.number:
+                chat_win_nr = w.number
+            if w == vim.current.window:
+                curr_win_nr = w.number
+
+        if chat_win_nr is not None:
+            if curr_win_nr == chat_win_nr:
+                vim.command("normal! G")
+            else:
+                vim.command(f"noautocmd {chat_win_nr}wincmd w")
+                vim.command("normal! G")
+                if curr_win_nr is not None:
+                    vim.command(f"noautocmd {curr_win_nr}wincmd w")
 
     except Exception as e:
         util.log_info(f"Error writing to chat buffer: {e}")
     finally:
-        #vim.command(f"call setbufvar({buffer.number}, '&modifiable', 0)")
         buffer.options["modifiable"] = 0
