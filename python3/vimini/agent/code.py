@@ -3,10 +3,9 @@ import json
 import logging
 import re
 import difflib
-from google import genai
 from google.genai import types
 from vimini.agent.comms import CommSession
-from vimini.agent.server import load_api_key
+from vimini.common.genai import get_client, create_generation_config
 from vimini.common.context import upload_context_files
 
 logger = logging.getLogger('vimini_agent')
@@ -81,7 +80,6 @@ class CodeSession(CommSession):
             return
 
         agent_config = self.agent_config or {}
-        api_key = load_api_key(agent_config)
         model = agent_config.get("model")
         default_temperature = agent_config.get("temperature")
 
@@ -105,7 +103,7 @@ class CodeSession(CommSession):
         buffers = params.get("buffers", [])
         task_instruction = params.get("task_instruction", "")
         try:
-            client = genai.Client(api_key=api_key) if api_key else genai.Client()
+            client = get_client(config=agent_config)
 
             file_object_schema = types.Schema(
                 type=types.Type.OBJECT,
@@ -166,21 +164,13 @@ class CodeSession(CommSession):
                 *uploaded_files
             ]
 
-            generation_config = types.GenerateContentConfig(
+            generation_config = create_generation_config(
+                temperature=temperature,
+                verbose=verbose,
                 response_mime_type="application/json",
-                response_schema=multi_file_output_schema
+                response_schema=multi_file_output_schema,
+                disable_function_calling=True
             )
-
-            if temperature is not None:
-                try:
-                    temp_float = float(temperature)
-                    if 0.0 <= temp_float <= 2.0:
-                        generation_config.temperature = temp_float
-                except (ValueError, TypeError):
-                    pass
-
-            if verbose:
-                generation_config.thinking_config = types.ThinkingConfig(include_thoughts=True)
 
             response_stream = client.models.generate_content_stream(
                 model=model,

@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 from vimini.common.util import get_project_root
 from vimini.agent.comms import CommSession
-from vimini.common.genai import get_client, load_api_key
+from vimini.common.genai import get_client, load_api_key, create_generation_config
 
 logger = logging.getLogger('vimini_agent')
 
@@ -166,14 +166,16 @@ class ChatSession(CommSession):
         agent_config = self.agent_config or {}
         api_key = load_api_key(agent_config)
         model = agent_config.get("model")
+        temperature = agent_config.get("temperature")
 
         if prompt:
             logger.info(f"User prompt: {prompt}")
 
         if not self.session:
             self.client = get_client(config=agent_config)
-            agent_config_obj = types.GenerateContentConfig(
+            agent_config_obj = create_generation_config(
                 tools=agent_tools,
+                temperature=temperature,
                 system_instruction=(
                     "When explicitly requested to change code You act as an expert "
                     "autonomous coding agent and software engineer, and can access "
@@ -189,7 +191,8 @@ class ChatSession(CommSession):
                     "3. **Patch Reliability:** `apply_patch` should ideally be the final action in your response. If a patch fails due to a formatting or context mismatch, do not blindly retry the exact same patch. First, re-read the file to obtain the up-to-date content, then formulate a corrected diff.\n"
                     "4. **Limit Retries:** Avoid multiple calls to `apply_patch` for the same file in a single response. If an apply_patch command is refused, do not retry and instead prompt the user for more instructions.\n"
                     "5. **Be Concise:** Provide brief, clear explanations. Avoid unnecessary conversational filler."
-                )
+                ),
+                disable_function_calling=False
             )
             self.session = self.client.chats.create(
                 model=model,

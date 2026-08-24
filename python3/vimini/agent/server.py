@@ -16,7 +16,7 @@ import select
 import logging
 import signal
 import atexit
-from vimini.common.genai import get_client, load_api_key
+from vimini.common.genai import get_client, load_api_key, create_generation_config
 
 MAX_RECEIVE_BUFFER_SIZE = 1024 * 1024
 AGENT_CONFIG = {}
@@ -68,15 +68,7 @@ def execute_function(req_id, method, params, result_queue, conn):
             model = AGENT_CONFIG.get("model")
             prompt = params.get("prompt", "") if isinstance(params, dict) else ""
             temperature = AGENT_CONFIG.get("temperature")
-            from google.genai import types
-            config = types.GenerateContentConfig(
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-            )
-            if temperature is not None:
-                try:
-                    config.temperature = float(temperature)
-                except (ValueError, TypeError):
-                    pass
+            config = create_generation_config(temperature=temperature, disable_function_calling=True)
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
@@ -95,15 +87,7 @@ def execute_function(req_id, method, params, result_queue, conn):
             model = AGENT_CONFIG.get("model")
             prompt = params.get("prompt", "") if isinstance(params, dict) else ""
             temperature = AGENT_CONFIG.get("temperature")
-            from google.genai import types
-            config = types.GenerateContentConfig(
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-            )
-            if temperature is not None:
-                try:
-                    config.temperature = float(temperature)
-                except (ValueError, TypeError):
-                    pass
+            config = create_generation_config(temperature=temperature, disable_function_calling=True)
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
