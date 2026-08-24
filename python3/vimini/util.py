@@ -4,6 +4,7 @@ import threading
 import queue
 from google import genai
 from google.genai import types
+from vimini.common.genai import get_client as create_genai_client, load_api_key
 
 # Module-level variables to store the API key file, model name, and client instance.
 _API_KEY_FILE = None
@@ -39,15 +40,7 @@ def send_channel_request(req_dict, silent=False):
         return False
 
 def get_api_key():
-    if _API_KEY_FILE:
-        expanded_path = os.path.expanduser(_API_KEY_FILE)
-        if os.path.exists(expanded_path):
-            try:
-                with open(expanded_path, 'r', encoding='utf-8') as f:
-                    return f.read().strip()
-            except Exception:
-                pass
-    return None
+    return load_api_key(api_key_file=_API_KEY_FILE)
 
 def get_client():
     """
@@ -62,7 +55,7 @@ def get_client():
         try:
             vim.command("echo '[Vimini] Initializing API client...'")
             vim.command("redraw")
-            _GENAI_CLIENT = genai.Client(api_key=api_key)
+            _GENAI_CLIENT = create_genai_client(api_key=api_key)
             vim.command("echo ''") # Clear the message
         except Exception as e:
             vim.command(f"echoerr '[Vimini] Error creating API client: {e}'")
@@ -130,7 +123,6 @@ def get_git_repo_root():
         message = "Git command not found or failed."
         log_info(f"ERROR: {message} Exception: {e}")
         return None
-
 
     if repo_path_result.returncode != 0:
         message = "Git command not found or failed."
@@ -284,7 +276,9 @@ def create_generation_kwargs(contents, temperature=None, verbose=False, response
     Returns:
         dict: A dictionary of keyword arguments for the API call.
     """
-    generation_config = types.GenerateContentConfig()
+    generation_config = types.GenerateContentConfig(
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+    )
 
     if temperature is not None:
         try:

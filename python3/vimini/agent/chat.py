@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 from vimini.common.util import get_project_root
 from vimini.agent.comms import CommSession
-from vimini.agent.server import load_api_key
+from vimini.common.genai import get_client, load_api_key
 
 logger = logging.getLogger('vimini_agent')
 
@@ -171,7 +171,7 @@ class ChatSession(CommSession):
             logger.info(f"User prompt: {prompt}")
 
         if not self.session:
-            self.client = genai.Client(api_key=api_key) if api_key else genai.Client()
+            self.client = get_client(config=agent_config)
             agent_config_obj = types.GenerateContentConfig(
                 tools=agent_tools,
                 system_instruction=(
