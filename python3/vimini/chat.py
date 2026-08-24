@@ -8,8 +8,8 @@ WAITING_MSG = "Waiting for prompt (CTRL-W q to exit)"
 WELCOME_MSG = "Welcome to Vimini! Waiting for prompt (CTRL-W q to exit)"
 HINT_MSG = "Press Enter twice to submit prompt"
 
-Q_prefix = "Q: "
-A_prefix = "A: "
+Q_prefix = "< "
+A_prefix = "> "
 
 def _to_str(val):
     if isinstance(val, bytes):
@@ -38,6 +38,20 @@ def _find_chat_buffer(req_id):
     except Exception:
         pass
     return None
+
+def _set_waiting(buffer, waiting):
+    if buffer is None:
+        return
+    try:
+        buffer.vars["vimini_waiting"] = bool(waiting)
+        req_id = _to_str(buffer.vars.get("vimini_job_id", ""))
+        base_name = f"[{req_id}] Vimini Chat" if req_id else "Vimini Chat"
+        if waiting:
+            buffer.name = f"{base_name} - [Processing...]"
+        else:
+            buffer.name = base_name
+    except Exception as e:
+        util.log_info(f"Error setting chat buffer waiting state: {e}")
 
 def _prompt_window_exists(req_id=None):
     for w in vim.windows:
@@ -118,9 +132,10 @@ def _open_prompt_window(req_id):
         vim.command("syntax match ViminiPromptHint '^Press Enter twice to submit prompt$'")
 
         vim.command(f"autocmd TextChanged,TextChangedI,TextChangedP,InsertLeave <buffer> py3 from vimini.chat import _check_prompt_buffer; _check_prompt_buffer({prompt_buf_num})")
+        vim.command("autocmd BufEnter <buffer> startinsert!")
 
         vim.current.window.cursor = (2, 0)
-        vim.command("startinsert")
+        vim.command("startinsert!")
     except Exception as e:
         util.log_info(f"Error opening prompt window: {e}")
 
@@ -182,7 +197,7 @@ def submit_prompt(prompt_buf_num=None, prompt_text=None):
 def send_agent_approval(approved, req_id):
     req = {
         "jsonrpc": "2.0",
-        "id": req_id,
+        "id": str(req_id),
         "method": "chat",
         "params": {
             "approved": bool(approved)
@@ -193,7 +208,7 @@ def send_agent_approval(approved, req_id):
 def send_chat_termination(req_id):
     req = {
         "jsonrpc": "2.0",
-        "id": req_id,
+        "id": str(req_id),
         "method": "chat",
         "params": {
             "terminate": True
@@ -207,7 +222,7 @@ def _on_chat_buffer_closed(buf_num):
         req_id = ""
         prompt_buf_num = None
         if buffer is not None:
-            buffer.vars["vimini_waiting"] = False
+            _set_waiting(buffer, False)
             req_id = _to_str(buffer.vars.get("vimini_job_id", ""))
             prompt_buf_num = buffer.vars.get("vimini_prompt_buf_num")
 
@@ -238,12 +253,13 @@ def _on_chat_buffer_closed(buf_num):
 
 def _on_patch_buffer_closed(req_id):
     try:
+        req_id = str(req_id)
         handled = int(vim.eval("get(b:, 'vimini_patch_handled', 0)"))
         if handled:
             return
         vim.command("let b:vimini_patch_handled = 1")
         util.display_message("Patch buffer closed without applying. Canceling operation...", history=True)
-        send_agent_approval(False, req_id)
+        send_agent_approval(False, str(req_id))
     except Exception as e:
         util.log_info(f"Error in _on_patch_buffer_closed: {e}")
 
@@ -352,8 +368,8 @@ def _open_patch_buffer(temp_file, req_id):
 
         buffer[:] = summary_lines + diff_content.splitlines()
 
-        buffer.options["filetype"] = "diff"
-        vim.command(f"autocmd BufUnload <buffer> py3 from vimini.chat import _on_patch_buffer_closed; _on_patch_buffer_closed({req_id})")
+        vim.command("setlocal filetype=diff")
+        vim.command(f"autocmd BufUnload <buffer> py3 from vimini.chat import _on_patch_buffer_closed; _on_patch_buffer_closed('{req_id}')")
 
         util.display_message("Patch buffer opened. Run :ViminiApply to apply changes.", history=True)
         vim.command("redraw!")
@@ -396,7 +412,7 @@ def handle_channel_response(req_id, result):
             send_agent_approval(False, req_id)
 
     elif status in ("done", "ok"):
-        buffer.vars["vimini_waiting"] = False
+        _set_waiting(buffer, False)
         text = result.get("text", "")
         if text:
             _write_to_buffer(buffer, text, append_to_last=True)
@@ -404,10 +420,10 @@ def handle_channel_response(req_id, result):
         _open_prompt_window(req_id)
 
     elif status == "terminated":
-        buffer.vars["vimini_waiting"] = False
+        _set_waiting(buffer, False)
 
     elif status == "error":
-        buffer.vars["vimini_waiting"] = False
+        _set_waiting(buffer, False)
         err_msg = result.get("error", "Unknown error")
         _write_to_buffer(buffer, [f"\n[Error: {err_msg}]", "", WAITING_MSG])
         _open_prompt_window(req_id)
@@ -435,13 +451,15 @@ def _send_prompt(prompt, buffer):
     if last_line != "":
         lines_to_add.append("")
 
-    lines_to_add.append(f"{Q_prefix}{prompt}")
+    prompt_lines = prompt.split('\n')
+    for pl in prompt_lines:
+        lines_to_add.append(f"{Q_prefix}{pl}")
     lines_to_add.append("---")
     lines_to_add.append(A_prefix)
 
     _write_to_buffer(buffer, lines_to_add)
 
-    buffer.vars["vimini_waiting"] = True
+    _set_waiting(buffer, True)
 
     req = {
         "jsonrpc": "2.0",
@@ -453,7 +471,7 @@ def _send_prompt(prompt, buffer):
     }
 
     if not util.send_channel_request(req, False):
-        buffer.vars["vimini_waiting"] = False
+        _set_waiting(buffer, False)
         _write_to_buffer(buffer, ["", "[Error: Agent channel is not open]", "", WAITING_MSG])
         _open_prompt_window(_to_str(buffer.vars.get("vimini_job_id", "")))
     else:
@@ -478,13 +496,13 @@ def chat():
     vim.command("highlight default ViminiPrompt ctermfg=DarkBlue guifg=DarkBlue")
     vim.command("highlight default ViminiService ctermfg=Green guifg=Green cterm=italic gui=italic")
     vim.command("syntax match ViminiWaiting '^\\(Welcome.*\\|Waiting for prompt.*\\)'")
-    vim.command("syntax match ViminiPrompt '^Q: .*'")
+    vim.command("syntax match ViminiPrompt '^< .*'")
     vim.command("syntax match ViminiService '^Agent Requested: .*'")
     vim.command(f"autocmd BufUnload <buffer> py3 from vimini.chat import _on_chat_buffer_closed; _on_chat_buffer_closed({buf_num})")
     vim.command(f"autocmd BufEnter <buffer> py3 from vimini.chat import _on_chat_buf_enter; _on_chat_buf_enter({buf_num})")
 
     buffer.vars["vimini_job_id"] = req_id
-    buffer.vars["vimini_waiting"] = False
+    _set_waiting(buffer, False)
 
     _write_to_buffer(buffer, [WELCOME_MSG], clear=True)
     _open_prompt_window(req_id)
@@ -492,14 +510,25 @@ def chat():
 def _write_to_buffer(buffer, content, clear=False, append_to_last=False):
     buffer.options["modifiable"] = 1
     try:
-        if clear:
-            buffer[:] = content if isinstance(content, list) else [content]
+        if isinstance(content, str):
+            lines = content.split('\n')
+        elif isinstance(content, list):
+            lines = []
+            for item in content:
+                if isinstance(item, str):
+                    lines.extend(item.split('\n'))
+                else:
+                    lines.append(str(item))
         else:
-            if append_to_last and isinstance(content, str):
+            lines = [str(content)]
+
+        if clear:
+            buffer[:] = lines
+        else:
+            if append_to_last:
                 if len(buffer) > 0 and buffer[-1].startswith("Agent Requested:"):
-                    if not content.startswith('\n'):
-                        content = '\n' + content
-                lines = content.split('\n')
+                    if isinstance(content, str) and not content.startswith('\n'):
+                        lines.insert(0, '')
                 if len(buffer) > 0:
                     buffer[-1] += lines[0]
                 else:
@@ -507,9 +536,10 @@ def _write_to_buffer(buffer, content, clear=False, append_to_last=False):
                 if len(lines) > 1:
                     buffer.append(lines[1:])
             else:
-                if isinstance(content, str):
-                    content = content.split('\n')
-                buffer.append(content)
+                if len(buffer) == 1 and buffer[0] == "":
+                    buffer[:] = lines
+                else:
+                    buffer.append(lines)
 
         chat_win_nr = None
         curr_win_nr = None
@@ -528,6 +558,7 @@ def _write_to_buffer(buffer, content, clear=False, append_to_last=False):
                 if curr_win_nr is not None:
                     vim.command(f"noautocmd {curr_win_nr}wincmd w")
 
+        vim.command("redraw")
     except Exception as e:
         util.log_info(f"Error writing to chat buffer: {e}")
     finally:
