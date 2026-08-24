@@ -311,9 +311,9 @@ Vim.
 :ViminiDiff
 ```
 
-#### `:ViminiCommit [-n] [-r] [instructions]`
+#### `:ViminiCommit [-n] [-r] [-a] [instructions]`
 
-Automates the commit process using AI. This command has two main modes:
+Automates the commit process using AI. This command has three main modes:
 
 **Default Mode (Creating a new commit):**
 
@@ -323,7 +323,7 @@ When run without flags (or with `-n`), it automates the creation of a new commit
 3.  Displays the generated message for confirmation (`y/n`).
 4.  If confirmed, it commits the changes with the generated message.
 
-**Regenerate/Amend Mode (`-r`):**
+**Regenerate Mode (`-r`):**
 
 When run with the `-r` flag, it regenerates the commit message for the last commit (`HEAD`) and amends it:
 1.  It gets the diff from the `HEAD` commit.
@@ -331,12 +331,22 @@ When run with the `-r` flag, it regenerates the commit message for the last comm
 3.  It displays the message for confirmation (`y/n`).
 4.  If confirmed, it amends the `HEAD` commit with the new message. This is useful for quickly rewriting a commit message you just made.
 
+**Amend Code and Regenerate Mode (`-a`):**
+
+When run with the `-a` flag, it amends the current working tree changes into the last commit (`HEAD`) and regenerates the commit message:
+1.  Stages current changes.
+2.  Amends the code into `HEAD` (`git commit --amend --no-edit`).
+3.  Generates a new commit message based on the new combined diff from `HEAD`.
+4.  Displays the message for confirmation (`y/n`).
+5.  If confirmed, it amends the `HEAD` commit with the new message.
+
 You can also provide optional `[instructions]` at the end of the command to guide the AI's message generation (e.g., "Mention issue #123" or "Keep it very brief").
 
 **Options:**
 
 *   **`-n`**: Omit the `Co-authored-by` trailer for a specific commit. By default, a trailer is appended and can be configured with `g:vimini_commit_author`.
-*   **`-r`**: Enable the regenerate/amend mode.
+*   **`-r`**: Enable the regenerate message mode for `HEAD`.
+*   **`-a`**: Amend current changes into `HEAD` and regenerate the commit message.
 
 **Examples:**
 ```vim
@@ -354,6 +364,9 @@ You can also provide optional `[instructions]` at the end of the command to guid
 
 " Regenerate with instructions
 :ViminiCommit -r Make it shorter
+
+" Amend current changes into HEAD and regenerate commit message
+:ViminiCommit -a
 ```
 
 ### Ripgrep Integration (Highly Experimental)

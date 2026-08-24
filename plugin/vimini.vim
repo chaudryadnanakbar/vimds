@@ -308,6 +308,7 @@ command! ViminiDiff call ViminiDiff()
 function! ViminiCommit(q_args)
   let l:assistant = 1
   let l:regenerate = 0
+  let l:amend = 0
   let l:other_args = []
   let l:args = split(a:q_args)
   for l:arg in l:args
@@ -315,6 +316,8 @@ function! ViminiCommit(q_args)
       let l:assistant = 0
     elseif l:arg ==# '-r'
       let l:regenerate = 1
+    elseif l:arg ==# '-a'
+      let l:amend = 1
     else
       call add(l:other_args, l:arg)
     endif
@@ -326,9 +329,10 @@ try:
     from vimini import main
     assistant = bool(int(vim.eval('l:assistant')))
     regenerate = bool(int(vim.eval('l:regenerate')))
+    amend = bool(int(vim.eval('l:amend')))
     refinement = vim.eval('l:prompt_refinement')
     temperature = vim.eval("get(g:, 'vimini_temperature', v:null)")
-    main.commit(assistant=assistant, temperature=temperature, regenerate=regenerate, refinement=refinement)
+    main.commit(assistant=assistant, temperature=temperature, regenerate=regenerate, amend=amend, refinement=refinement)
 except Exception as e:
     error_message = str(e).replace("'", "''")
     vim.command(f"echoerr '[Vimini] Error: {error_message}'")
