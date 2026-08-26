@@ -3,46 +3,35 @@ import os
 import json
 import logging
 from . import util
+from vimini.common.util import (
+    load_project_data,
+    save_project_data,
+    get_project_data_file_path
+)
 from vimini.common.context import upload_context_files as _common_upload_context_files
 
 # --- Context File Storage Helpers ---
 
-def get_project_name():
-    project_name = util.get_git_repo_name()
-    if not project_name or project_name == "temp":
-        return None
-    return project_name
-
-def get_project_context_file_path():
-    project_name = get_project_name()
-    if not project_name:
-        return None
-    projects_dir = os.path.expanduser("~/.var/vimini/projects")
-    return os.path.join(projects_dir, project_name)
-
 def save_project_context_files(files):
     try:
-        file_path = get_project_context_file_path()
-        if not file_path:
-            return
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(files, f, indent=2)
-        util.log_info(f"Saved context files for project to {file_path}")
+        project_root = util.get_git_repo_root() or os.getcwd()
+        data = load_project_data(start_dir=project_root)
+        data["files"] = files
+        if save_project_data(data, start_dir=project_root):
+            file_path = get_project_data_file_path(start_dir=project_root)
+            util.log_info(f"Saved context files for project to {file_path}")
     except Exception as e:
         util.display_message(f"Error saving project context files: {e}", error=True)
 
 def restore_context_files():
     try:
-        file_path = get_project_context_file_path()
-        if not file_path:
-            return
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                restored_files = json.load(f)
-            if isinstance(restored_files, list):
-                vim.command(f"let g:context_files = {json.dumps(restored_files)}")
-                util.log_info(f"Restored context files for project from {file_path}")
+        project_root = util.get_git_repo_root() or os.getcwd()
+        file_path = get_project_data_file_path(start_dir=project_root)
+        data = load_project_data(start_dir=project_root)
+        restored_files = data.get("files", [])
+        if isinstance(restored_files, list) and restored_files:
+            vim.command(f"let g:context_files = {json.dumps(restored_files)}")
+            util.log_info(f"Restored context files for project from {file_path}")
     except Exception as e:
         util.log_info(f"Failed to restore context files: {e}")
 

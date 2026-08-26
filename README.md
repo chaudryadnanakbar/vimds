@@ -142,6 +142,19 @@ customizations.
     let g:context_files = ['package.json', 'src/main.js', 'src/utils/api.js']
     ```
 
+9.  **Build and Test Commands**:
+    Configure per-project shell commands for compiling/building code and running tests when invoked by chat tools (`build_code` and `test_code`). Project configuration is stored in `~/.var/vimini/projects/<project_name>`:
+    ```json
+    {
+      "version": "0.1",
+      "configuration": {
+        "build-command": "make -j$(nproc)",
+        "test-command": "pytest"
+      },
+      "files": []
+    }
+    ```
+
 ## Usage
 
 Vimini exposes several commands for interacting with the Gemini API:

@@ -59,6 +59,20 @@ agent_tools = [
                         )
                     }
                 )
+            ),
+            types.FunctionDeclaration(
+                name='build_code',
+                description='Compiles or builds the code in the project.',
+                parameters=types.Schema(
+                    type=types.Type.OBJECT
+                )
+            ),
+            types.FunctionDeclaration(
+                name='test_code',
+                description='Runs the project test suite.',
+                parameters=types.Schema(
+                    type=types.Type.OBJECT
+                )
             )
         ]
     )
@@ -189,8 +203,9 @@ class ChatSession(CommSession):
                     "1. **Understand Context First:** Before proposing or applying any code changes, use `list_directory` and `read_file` tools to understand the repository structure and exact file contents. Never assume or guess code.\n"
                     "2. **Use the Patch Tool Correctly:** To modify files, use the `apply_patch` tool. Provide a valid unified diff. Use file paths relative to the project root. Ensure your diff includes sufficient unmodified context lines for reliable application.\n"
                     "3. **Patch Reliability:** `apply_patch` should ideally be the final action in your response. If a patch fails due to a formatting or context mismatch, do not blindly retry the exact same patch. First, re-read the file to obtain the up-to-date content, then formulate a corrected diff.\n"
-                    "4. **Limit Retries:** Avoid multiple calls to `apply_patch` for the same file in a single response. If an apply_patch command is refused, do not retry and instead prompt the user for more instructions.\n"
-                    "5. **Be Concise:** Provide brief, clear explanations. Avoid unnecessary conversational filler."
+                    "4. **Build and Test Tools:** Test and build tools may be expensive and should be invoked only if the user instructions include a request to build or test changes. You can use `build_code` to compile/build the project and `test_code` to execute the project test suite to verify code changes or diagnose errors.\n"
+                    "5. **Limit Retries:** Avoid multiple calls to `apply_patch` for the same file in a single response. If an apply_patch command is refused, do not retry and instead prompt the user for more instructions.\n"
+                    "6. **Be Concise:** Provide brief, clear explanations. Avoid unnecessary conversational filler."
                 ),
                 disable_function_calling=False
             )
@@ -328,6 +343,26 @@ class ChatSession(CommSession):
                         responses.append(types.Part.from_function_response(
                             name=tool_call.name,
                             response={'result': patch_result}
+                        ))
+                    elif tool_call.name in ('build_code', 'test_code'):
+                        tool_res = next_params.get("tool_result", {}) if isinstance(next_params, dict) else {}
+                        status = tool_res.get("status") if isinstance(tool_res, dict) else None
+                        if status == "success":
+                            result_text = "Command executed successfully."
+                        elif status == "failure":
+                            header = tool_res.get("header", "Command execution failed.")
+                            output = tool_res.get("output", "")
+                            result_text = f"{header}\n\nCommand Output:\n{output}" if output else header
+                        elif status == "not_available":
+                            result_text = tool_res.get("message", f"The tool '{tool_call.name}' is not available for this project because no command is configured.")
+                        else:
+                            if not is_approved and "tool_result" not in next_params:
+                                result_text = "Tool execution cancelled or rejected by user."
+                            else:
+                                result_text = str(tool_res) if tool_res else "Tool executed."
+                        responses.append(types.Part.from_function_response(
+                            name=tool_call.name,
+                            response={'result': result_text}
                         ))
                     else:
                         if is_approved:
