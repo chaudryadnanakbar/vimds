@@ -211,19 +211,6 @@ def send_agent_approval(approved, req_id):
     }
     util.send_channel_request(req, True)
 
-def send_agent_tool_result(req_id, tool, tool_result):
-    req = {
-        "jsonrpc": "2.0",
-        "id": str(req_id),
-        "method": "chat",
-        "params": {
-            "tool": tool,
-            "tool_result": tool_result,
-            "approved": True
-        }
-    }
-    util.send_channel_request(req, True)
-
 def send_chat_termination(req_id):
     req = {
         "jsonrpc": "2.0",
@@ -395,120 +382,57 @@ def _open_patch_buffer(temp_file, req_id):
     except Exception as e:
         util.log_info(f"Error creating patch buffer: {e}")
 
-def _get_project_command(tool):
-    from vimini.common.util import get_project_config
-    prefix = "build" if tool == "build_code" else "test"
-
-    # Check per-project configuration
-    project_root = util.get_git_repo_root() or os.getcwd()
-    config_key = f"{prefix}-command"
-    cmd = get_project_config(config_key, start_dir=project_root)
-    if cmd and isinstance(cmd, str) and cmd.strip():
-        return cmd.strip()
-
-    return None
-
-def _save_tool_output_buffer(req_id, tool, cmd, output, returncode):
-    try:
-        tool_label = "Build" if tool == "build_code" else "Test"
-        buf_name = f"[{req_id}] Vimini {tool_label} Output"
-
-        target_buf = None
-        for b in vim.buffers:
-            if b.name and os.path.basename(b.name) == buf_name:
-                target_buf = b
-                break
-
-        header_lines = [
-            f"# Vimini {tool_label} Output",
-            f"# Command: {cmd}",
-            f"# Return Code: {returncode}",
-            f"# Status: {'Success' if returncode == 0 else 'Failed'}",
-            "---",
-            ""
-        ]
-        out_lines = output.splitlines() if output else ["(No output)"]
-        all_lines = header_lines + out_lines
-
-        chat_buf = _find_chat_buffer(req_id)
-        chat_win_nr = int(vim.eval(f"bufwinnr({chat_buf.number})")) if chat_buf else int(vim.eval("winnr()"))
-
-        if target_buf:
-            target_buf.options["modifiable"] = 1
-            target_buf[:] = all_lines
-            target_buf.options["modifiable"] = 0
-        else:
-            util.new_split()
-            safe_name = buf_name.replace(" ", "\\ ")
-            vim.command(f"file {safe_name}")
-            new_buf = vim.current.buffer
-            new_buf.options["buftype"] = "nofile"
-            new_buf.options["bufhidden"] = "wipe"
-            new_buf.options["swapfile"] = 0
-            new_buf.options["filetype"] = "text"
-            new_buf.options["modifiable"] = 1
-            new_buf[:] = all_lines
-            new_buf.options["modifiable"] = 0
-
-            if chat_win_nr > 0:
-                vim.command(f"noautocmd {chat_win_nr}wincmd w")
-
-        vim.command("redraw")
-    except Exception as e:
-        util.log_info(f"Error saving tool output buffer: {e}")
-
-def _execute_project_tool(req_id, buffer, tool, args):
-    tool_label = "build" if tool == "build_code" else "test"
-    cmd = _get_project_command(tool)
-
-    if not cmd:
-        project_name = util.get_git_repo_name()
-        project_file_path = os.path.expanduser(f"~/.var/vimini/projects/{project_name}") if project_name and project_name != "temp" else "~/.var/vimini/projects/<project_name>"
-        config_key = f"{tool_label}-command"
-        msg = (
-            f"\n[No {tool_label} command is defined for this project]\n"
-            f"To configure a {tool_label} command, run :ViminiConfig or set '{config_key}' in the project file:\n"
-            f"  {project_file_path}\n"
-        )
-        _write_to_buffer(buffer, msg, append_to_last=True)
-        send_agent_tool_result(req_id, tool, {
-            "status": "not_available",
-            "message": f"The tool '{tool}' is not available for this project because no {tool_label} command is configured in project options."
-        })
-        return
-
-    _write_to_buffer(buffer, f"\n[Executing {tool_label} command: {cmd}...]\n", append_to_last=True)
-
-    project_root = util.get_git_repo_root() or os.getcwd()
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors='replace', cwd=project_root)
-        stdout = res.stdout or ""
-        stderr = res.stderr or ""
-        output = (stdout + ("\n" if stdout and stderr else "") + stderr).strip()
-        returncode = res.returncode
-    except Exception as e:
-        output = f"Execution error: {e}"
-        returncode = -1
-
-    _save_tool_output_buffer(req_id, tool, cmd, output, returncode)
-
-    status_str = "succeeded" if returncode == 0 else f"failed with exit code {returncode}"
-    chat_msg = f"\n[{tool_label.capitalize()} command {status_str}]\nOutput:\n{output}\n" if output else f"\n[{tool_label.capitalize()} command {status_str} with no output]\n"
-    _write_to_buffer(buffer, chat_msg, append_to_last=True)
-
-    if returncode == 0:
-        send_agent_tool_result(req_id, tool, {
-            "status": "success",
-            "result": f"Command '{cmd}' succeeded."
-        })
+def _request_tool_permission(req_id, tool, cmd=None):
+    tool_label = "Build" if tool == "build_code" else "Test"
+    popup_content = [
+        f"Execute {tool_label} Command?",
+        ""
+    ]
+    if cmd:
+        popup_content.append(f"Command: {cmd}")
     else:
-        send_agent_tool_result(req_id, tool, {
-            "status": "failure",
-            "output": output,
-            "header": f"{tool_label.capitalize()} command '{cmd}' failed (exit code {returncode}).",
-            "command": cmd,
-            "returncode": returncode
-        })
+        popup_content.append(f"Tool: {tool}")
+    popup_content.extend([
+        "",
+        "---",
+        "Allow execution? [y/n]"
+    ])
+
+    popup_options = {
+        'title': f' Confirm {tool_label} Execution ', 'line': 0, 'col': 0,
+        'minwidth': 40, 'maxwidth': 80,
+        'padding': [1, 2, 1, 2], 'border': [1, 1, 1, 1],
+        'borderchars': ['─', '│', '─', '│', '╭', '╮', '╯', '╰'],
+        'close': 'none', 'zindex': 200,
+    }
+
+    confirmed = False
+    try:
+        popup_id = vim.eval(f"popup_create({json.dumps(popup_content)}, {popup_options})")
+        vim.command("redraw!")
+        try:
+            answer_code = vim.eval('getchar()')
+            try:
+                answer_char = chr(int(answer_code))
+            except (ValueError, TypeError):
+                answer_char = ""
+            if answer_char.lower() == 'y':
+                confirmed = True
+        finally:
+            if int(popup_id) > 0:
+                vim.eval(f"popup_close({popup_id})")
+                vim.command("redraw!")
+    except Exception as e:
+        util.log_info(f"Popup creation failed, falling back to confirm: {e}")
+        try:
+            prompt_msg = f"Allow agent to execute {tool_label} command ({cmd or tool})?"
+            res = vim.eval(f"confirm('{prompt_msg}', \"&Yes\\n&No\", 2)")
+            confirmed = (int(res) == 1)
+        except Exception as e2:
+            util.log_info(f"Fallback confirm failed: {e2}")
+            confirmed = False
+
+    return confirmed
 
 def handle_channel_response(req_id, result):
     status = result.get("status")
@@ -528,6 +452,10 @@ def handle_channel_response(req_id, result):
 
         if tool == "apply_patch":
             req_line = f"\nAgent Requested: apply_patch({temp_file})"
+        elif tool in ("build_code", "test_code"):
+            cmd = result.get("command")
+            cmd_str = f": {cmd}" if cmd else ""
+            req_line = f"\nAgent Requested: {tool}{cmd_str}"
         else:
             args = result.get("args", {})
             if isinstance(args, dict):
@@ -543,7 +471,9 @@ def handle_channel_response(req_id, result):
         elif tool == "apply_patch":
             _open_patch_buffer(temp_file, req_id)
         elif tool in ("build_code", "test_code"):
-            _execute_project_tool(req_id, buffer, tool, result.get("args", {}))
+            cmd = result.get("command")
+            approved = _request_tool_permission(req_id, tool, cmd)
+            send_agent_approval(approved, req_id)
         else:
             send_agent_approval(False, req_id)
 
@@ -597,12 +527,14 @@ def _send_prompt(prompt, buffer):
 
     _set_waiting(buffer, True)
 
+    project_root = util.get_git_repo_root() or os.getcwd()
     req = {
         "jsonrpc": "2.0",
         "id": _to_str(buffer.vars.get("vimini_job_id", "")),
         "method": "chat",
         "params": {
             "prompt": prompt,
+            "project_root": project_root
         }
     }
 

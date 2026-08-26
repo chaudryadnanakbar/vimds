@@ -7,7 +7,12 @@ import tempfile
 import sys
 from google import genai
 from google.genai import types
-from vimini.common.util import get_project_root
+from vimini.common.util import (
+    get_project_root,
+    get_project_name,
+    get_project_config,
+    get_project_data_file_path
+)
 from vimini.agent.comms import CommSession
 from vimini.common.genai import get_client, load_api_key, create_generation_config
 
@@ -78,9 +83,10 @@ agent_tools = [
     )
 ]
 
-def list_directory(directory_path="."):
+def list_directory(directory_path=".", project_root=None):
     try:
-        project_root = get_project_root()
+        if not project_root:
+            project_root = get_project_root()
         target_path = os.path.realpath(os.path.join(project_root, directory_path))
 
         try:
@@ -106,9 +112,10 @@ def list_directory(directory_path="."):
     except Exception as e:
         return f"Error listing directory: {e}"
 
-def read_file(filepath):
+def read_file(filepath, project_root=None):
     try:
-        project_root = get_project_root()
+        if not project_root:
+            project_root = get_project_root()
         target_path = os.path.realpath(os.path.join(project_root, filepath))
 
         try:
@@ -127,8 +134,9 @@ def read_file(filepath):
     except Exception as e:
         return f"Error reading file: {e}"
 
-def validate_patch_is_safe(temp_file_path):
-    project_root = get_project_root()
+def validate_patch_is_safe(temp_file_path, project_root=None):
+    if not project_root:
+        project_root = get_project_root()
 
     if not temp_file_path or not os.path.exists(temp_file_path):
         return False, f"Temp file does not exist: {temp_file_path}"
@@ -168,6 +176,83 @@ class ChatSession(CommSession):
         self.method = "chat"
         self.client = None
         self.session = None
+        self.project_root = None
+
+    def execute_project_tool(self, tool, current_req_id, conn):
+        tool_label = "build" if tool == "build_code" else "test"
+        project_root = self.project_root or get_project_root()
+        cmd = get_project_config(f"{tool_label}-command", start_dir=project_root)
+
+        if not cmd:
+            project_name = get_project_name(project_root)
+            project_file_path = get_project_data_file_path(project_name, project_root) or "~/.var/vimini/projects/<project_name>"
+            config_key = f"{tool_label}-command"
+            msg = (
+                f"\n[No {tool_label} command is defined for this project]\n"
+                f"To configure a {tool_label} command, run :ViminiConfig or set '{config_key}' in the project file:\n"
+                f"  {project_file_path}\n"
+            )
+            self.send_response(current_req_id, conn, result={
+                "status": "chunk",
+                "text": msg
+            })
+            return f"The tool '{tool}' is not available for this project because no {tool_label} command is configured in project options."
+
+        self.send_response(current_req_id, conn, result={
+            "status": "chunk",
+            "text": f"\n[Executing {tool_label} command: {cmd}...]\n"
+        })
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=project_root,
+                errors='replace'
+            )
+
+            output_lines = []
+            for line in iter(proc.stdout.readline, ''):
+                output_lines.append(line)
+                self.send_response(current_req_id, conn, result={
+                    "status": "chunk",
+                    "text": line
+                })
+
+            proc.wait()
+            returncode = proc.returncode
+            full_output = "".join(output_lines).strip()
+        except Exception as e:
+            err_text = f"Execution error: {e}\n"
+            self.send_response(current_req_id, conn, result={
+                "status": "chunk",
+                "text": err_text
+            })
+            returncode = -1
+            full_output = err_text.strip()
+
+        status_str = "succeeded" if returncode == 0 else f"failed with exit code {returncode}"
+        chat_msg = f"\n[{tool_label.capitalize()} command {status_str}]\n"
+        self.send_response(current_req_id, conn, result={
+            "status": "chunk",
+            "text": chat_msg
+        })
+
+        if returncode == 0:
+            if full_output:
+                return f"Command '{cmd}' executed successfully.\n\nCommand Output:\n{full_output}"
+            else:
+                return f"Command '{cmd}' executed successfully."
+        else:
+            if full_output:
+                return f"{tool_label.capitalize()} command '{cmd}' failed (exit code {returncode}).\n\nCommand Output:\n{full_output}"
+            else:
+                return f"{tool_label.capitalize()} command '{cmd}' failed (exit code {returncode})."
+
 
     def _process_command(self, req_id, params, conn):
         if isinstance(params, dict) and params.get("terminate"):
@@ -177,6 +262,11 @@ class ChatSession(CommSession):
             return
 
         prompt = params.get("prompt", "") if isinstance(params, dict) else ""
+        if isinstance(params, dict) and params.get("project_root"):
+            self.project_root = params.get("project_root")
+        if not self.project_root:
+            self.project_root = get_project_root()
+
         agent_config = self.agent_config or {}
         api_key = load_api_key(agent_config)
         model = agent_config.get("model")
@@ -248,7 +338,7 @@ class ChatSession(CommSession):
                             f.write(diff_content)
                             temp_file_path = f.name
 
-                        is_safe, err_msg = validate_patch_is_safe(temp_file_path)
+                        is_safe, err_msg = validate_patch_is_safe(temp_file_path, self.project_root)
                         if not is_safe:
                             if temp_file_path and os.path.exists(temp_file_path):
                                 try:
@@ -266,6 +356,18 @@ class ChatSession(CommSession):
                             "status": "tool_use_requested",
                             "tool": tool_call.name,
                             "temp_file": temp_file_path,
+                            "text": req_msg
+                        })
+                    elif tool_call.name in ('build_code', 'test_code'):
+                        tool_label = "build" if tool_call.name == "build_code" else "test"
+                        cmd = get_project_config(f"{tool_label}-command", start_dir=self.project_root)
+                        cmd_info = f": {cmd}" if cmd else ""
+                        req_msg = f"\n[Agent requested tool execution: {tool_call.name}{cmd_info}]\n"
+                        self.send_response(current_req_id, conn, result={
+                            "status": "tool_use_requested",
+                            "tool": tool_call.name,
+                            "command": cmd,
+                            "args": args_dict,
                             "text": req_msg
                         })
                     else:
@@ -311,7 +413,7 @@ class ChatSession(CommSession):
                     if tool_call.name == 'list_directory':
                         if is_approved:
                             dir_path = args_dict.get('directory_path', '.')
-                            result_text = list_directory(dir_path)
+                            result_text = list_directory(dir_path, self.project_root)
                         else:
                             result_text = "Tool execution cancelled or rejected by user."
                         responses.append(types.Part.from_function_response(
@@ -321,7 +423,7 @@ class ChatSession(CommSession):
                     elif tool_call.name == 'read_file':
                         if is_approved:
                             filepath = args_dict.get('filepath', '')
-                            result_text = read_file(filepath)
+                            result_text = read_file(filepath, self.project_root)
                         else:
                             result_text = "Tool execution cancelled or rejected by user."
                         responses.append(types.Part.from_function_response(
@@ -345,21 +447,15 @@ class ChatSession(CommSession):
                             response={'result': patch_result}
                         ))
                     elif tool_call.name in ('build_code', 'test_code'):
-                        tool_res = next_params.get("tool_result", {}) if isinstance(next_params, dict) else {}
-                        status = tool_res.get("status") if isinstance(tool_res, dict) else None
-                        if status == "success":
-                            result_text = "Command executed successfully."
-                        elif status == "failure":
-                            header = tool_res.get("header", "Command execution failed.")
-                            output = tool_res.get("output", "")
-                            result_text = f"{header}\n\nCommand Output:\n{output}" if output else header
-                        elif status == "not_available":
-                            result_text = tool_res.get("message", f"The tool '{tool_call.name}' is not available for this project because no command is configured.")
+                        tool_label = "build" if tool_call.name == "build_code" else "test"
+                        if is_approved:
+                            result_text = self.execute_project_tool(tool_call.name, current_req_id, conn)
                         else:
-                            if not is_approved and "tool_result" not in next_params:
-                                result_text = "Tool execution cancelled or rejected by user."
-                            else:
-                                result_text = str(tool_res) if tool_res else "Tool executed."
+                            self.send_response(current_req_id, conn, result={
+                                "status": "chunk",
+                                "text": f"\n[{tool_label.capitalize()} command execution rejected by user]\n"
+                            })
+                            result_text = "Tool execution cancelled or rejected by user."
                         responses.append(types.Part.from_function_response(
                             name=tool_call.name,
                             response={'result': result_text}
