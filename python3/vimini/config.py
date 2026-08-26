@@ -166,6 +166,27 @@ def edit_config_option():
             util.display_message(f"Set '{key}' to {repr(new_bool)}")
             return
 
+        if schema_type == "choice" or key.endswith("-permission"):
+            choices = schema_info.get("choices", ["Ask", "Allow", "Deny"])
+            default_val = schema_info.get("default", "Ask")
+            cur_choice = current_val if current_val is not None else default_val
+
+            idx = -1
+            for i, c in enumerate(choices):
+                if str(cur_choice).strip().lower() == str(c).strip().lower():
+                    idx = i
+                    break
+
+            if idx == -1:
+                next_val = choices[0]
+            else:
+                next_val = choices[(idx + 1) % len(choices)]
+
+            _VIMINI_PENDING_PROJECT_CONFIG[key] = next_val
+            _refresh_config_buffer(win, line_num, col)
+            util.display_message(f"Set '{key}' to {repr(next_val)}")
+            return
+
         cur_str = "" if current_val is None else str(current_val)
 
         safe_prompt = f"Enter value for {key}: ".replace("'", "''")

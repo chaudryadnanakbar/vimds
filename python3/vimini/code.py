@@ -328,12 +328,12 @@ def show_diff():
 def apply_patch(diff_content, project_root=None, silent=False):
     """
     Applies a unified diff patch and reloads affected buffers.
-    Returns True if successful, False otherwise.
+    Returns (True, None) if successful, (False, error_message) otherwise.
     """
     if not diff_content:
         msg = "Diff is empty. Nothing to apply."
         if not silent: util.display_message(msg, history=True)
-        return False
+        return False, msg
 
     if not project_root:
         project_root = util.get_git_repo_root() or vim.eval("getcwd()")
@@ -350,9 +350,17 @@ def apply_patch(diff_content, project_root=None, silent=False):
         )
 
         if result.returncode != 0:
-            err_msg = f"Patch command failed. Please review the output and the diff.\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            stdout_str = result.stdout.strip() if result.stdout else ""
+            stderr_str = result.stderr.strip() if result.stderr else ""
+            output_parts = []
+            if stdout_str:
+                output_parts.append(f"STDOUT:\n{stdout_str}")
+            if stderr_str:
+                output_parts.append(f"STDERR:\n{stderr_str}")
+            out_msg = "\n".join(output_parts)
+            err_msg = f"Patch command failed.\n{out_msg}" if out_msg else "Patch command failed with non-zero exit code."
             if not silent: util.display_message(err_msg, error=True)
-            return False
+            return False, err_msg
 
         # Success
         util.display_message("Successfully applied modified diff.", history=True)
@@ -393,14 +401,16 @@ def apply_patch(diff_content, project_root=None, silent=False):
                         # Mark buffer to be reloaded when entered
                         vim.command(f"checktime {buf.number}")
                     break
-        return True
+        return True, None
 
     except FileNotFoundError:
-        util.display_message("Error: `patch` command not found. Is it in your PATH?", error=True)
-        return False
+        err_msg = "Error: `patch` command not found. Is it in your PATH?"
+        if not silent: util.display_message(err_msg, error=True)
+        return False, err_msg
     except Exception as e:
-        util.display_message(f"Error applying diff: {e}", error=True)
-        return False
+        err_msg = f"Error applying diff: {e}"
+        if not silent: util.display_message(err_msg, error=True)
+        return False, err_msg
 
 def apply_code(job_id=None):
     """
@@ -481,6 +491,15 @@ def apply_code(job_id=None):
     if not project_root:
         project_root = util.get_git_repo_root() or vim.eval("getcwd()")
 
+    is_chat_patch = False
+    chat_job_id = None
+    try:
+        is_chat_patch = int(_to_str(diff_buffer.vars.get("vimini_is_chat_patch", 0)) or 0) == 1
+        if is_chat_patch:
+            chat_job_id = _to_str(diff_buffer.vars.get("vimini_chat_job_id", ""))
+    except Exception:
+        pass
+
     separator_index = -1
     for i, line in enumerate(diff_buffer):
         if _DIFF_SEPARATOR in line:
@@ -494,26 +513,41 @@ def apply_code(job_id=None):
             diff_content += '\n'
     else:
         err_msg = "DIFF section not found, did you remove the separator?"
-        util.display_message(err_msg, error=True)
+        if is_chat_patch:
+            diff_buffer.vars["vimini_patch_handled"] = 1
+            from vimini.chat import send_agent_approval
+            send_agent_approval(False, chat_job_id, error=f"Patch failed to apply: {err_msg}\nPlease verify that the patch is properly formatted and retry.")
+            util.display_message("Patch failed to apply. Reported error to agent to retry.", history=True)
+            if diff_buffer.number in _BUFFER_DATA_STORE:
+                del _BUFFER_DATA_STORE[diff_buffer.number]
+            vim.command(f"bdelete! {diff_buffer.number}")
+        else:
+            util.display_message(err_msg, error=True)
         return  # Preserve buffer
 
     if not diff_content:
-        util.display_message("Diff is empty. Nothing to apply.", history=True)
+        if is_chat_patch:
+            diff_buffer.vars["vimini_patch_handled"] = 1
+            from vimini.chat import send_agent_approval
+            send_agent_approval(False, chat_job_id, error="Patch failed to apply: Diff is empty.\nPlease verify that the patch is properly formatted and retry.")
+            util.display_message("Patch failed to apply (empty diff). Reported error to agent to retry.", history=True)
+        else:
+            util.display_message("Diff is empty. Nothing to apply.", history=True)
         vim.command(f"bdelete! {diff_buffer.number}")
         if diff_buffer.number in _BUFFER_DATA_STORE:
             del _BUFFER_DATA_STORE[diff_buffer.number]
         return
 
-    if apply_patch(diff_content, project_root):
-        try:
-            is_chat_patch = int(_to_str(diff_buffer.vars.get("vimini_is_chat_patch", 0)) or 0)
-            if is_chat_patch == 1:
+    success, patch_err = apply_patch(diff_content, project_root, silent=is_chat_patch)
+
+    if success:
+        if is_chat_patch:
+            try:
                 diff_buffer.vars["vimini_patch_handled"] = 1
-                req_id = _to_str(diff_buffer.vars["vimini_chat_job_id"])
                 from vimini.chat import send_agent_approval
-                send_agent_approval(True, req_id)
-        except Exception as e:
-            util.log_info(f"Error sending agent approval from apply_code: {e}")
+                send_agent_approval(True, chat_job_id)
+            except Exception as e:
+                util.log_info(f"Error sending agent approval from apply_code: {e}")
 
         # Remove from data store
         if diff_buffer.number in _BUFFER_DATA_STORE:
@@ -521,3 +555,17 @@ def apply_code(job_id=None):
 
         # Cleanup
         vim.command(f"bdelete! {diff_buffer.number}")
+    else:
+        if is_chat_patch:
+            try:
+                diff_buffer.vars["vimini_patch_handled"] = 1
+                from vimini.chat import send_agent_approval
+                send_agent_approval(False, chat_job_id, error=f"Patch failed to apply:\n{patch_err}\nPlease verify that the patch is properly formatted and retry.")
+                util.display_message("Patch failed to apply. Reported error to agent to retry.", history=True)
+            except Exception as e:
+                util.log_info(f"Error sending agent failure from apply_code: {e}")
+
+            if diff_buffer.number in _BUFFER_DATA_STORE:
+                del _BUFFER_DATA_STORE[diff_buffer.number]
+
+            vim.command(f"bdelete! {diff_buffer.number}")

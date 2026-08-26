@@ -14,11 +14,25 @@ PROJECT_CONFIG_SCHEMA = {
         "default": None,
         "type": "string"
     },
+    "build-permission": {
+        "label": "Build Permission",
+        "description": "Execution permission for build command (Allow, Deny, or Ask)",
+        "default": "Ask",
+        "type": "choice",
+        "choices": ["Ask", "Allow", "Deny"]
+    },
     "test-command": {
         "label": "Test Command",
         "description": "Shell command to run the project test suite",
         "default": None,
         "type": "string"
+    },
+    "test-permission": {
+        "label": "Test Permission",
+        "description": "Execution permission for test command (Allow, Deny, or Ask)",
+        "default": "Ask",
+        "type": "choice",
+        "choices": ["Ask", "Allow", "Deny"]
     },
     "compilation-needed": {
         "label": "Compilation Needed",
@@ -171,7 +185,12 @@ def get_project_config(key, project_name=None, start_dir=None, default=None):
         val = config.get(key)
         if val is None:
             schema_default = PROJECT_CONFIG_SCHEMA.get(key, {}).get("default")
-            val = schema_default if schema_default is not None else default
+            if schema_default is not None:
+                val = schema_default
+            elif key.endswith("-permission"):
+                val = "Ask"
+            else:
+                val = default
 
         schema_info = PROJECT_CONFIG_SCHEMA.get(key, {})
         if schema_info.get("type") == "boolean" and val is not None:

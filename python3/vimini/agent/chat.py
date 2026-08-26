@@ -225,6 +225,13 @@ class ChatSession(CommSession):
         api_key = load_api_key(agent_config)
         model = agent_config.get("model")
         temperature = agent_config.get("temperature")
+        if isinstance(params, dict) and params.get("temperature") is not None:
+            temperature = params.get("temperature")
+        verbose = False
+        if isinstance(params, dict) and "verbose" in params:
+            verbose = bool(params.get("verbose"))
+        elif agent_config.get("verbose") is not None:
+            verbose = bool(agent_config.get("verbose"))
 
         if prompt:
             logger.info(f"User prompt: {prompt}")
@@ -252,6 +259,7 @@ class ChatSession(CommSession):
             agent_config_obj = create_generation_config(
                 tools=agent_tools,
                 temperature=temperature,
+                verbose=verbose,
                 system_instruction=(
                     "When explicitly requested to change code You act as an expert "
                     "autonomous coding agent and software engineer, and can access "
@@ -290,6 +298,14 @@ class ChatSession(CommSession):
                         if hasattr(part, 'function_call') and part.function_call:
                             tool_call = part.function_call
                             pending_tool_calls.append(tool_call)
+                        elif getattr(part, 'thought', False):
+                            thought_chunk = getattr(part, 'text', '') or ''
+                            if thought_chunk:
+                                self.send_response(current_req_id, conn, result={
+                                    "status": "thought",
+                                    "thought": thought_chunk,
+                                    "verbose": verbose
+                                })
                         elif hasattr(part, 'text') and part.text:
                             modified_text += part.text
 
@@ -300,6 +316,7 @@ class ChatSession(CommSession):
 
             if pending_tool_calls:
                 responses = []
+                next_req_id = current_req_id
                 for tool_call in pending_tool_calls:
                     args_dict = dict(tool_call.args) if tool_call.args else {}
                     temp_file_path = None
@@ -333,6 +350,24 @@ class ChatSession(CommSession):
                     elif tool_call.name in ('build_code', 'test_code'):
                         tool_label = "build" if tool_call.name == "build_code" else "test"
                         cmd = get_project_config(f"{tool_label}-command", start_dir=self.project_root)
+                        if not cmd:
+                            project_name = get_project_name(self.project_root)
+                            project_file_path = get_project_data_file_path(project_name, self.project_root) or "~/.var/vimini/projects/<project_name>"
+                            config_key = f"{tool_label}-command"
+                            msg = (
+                                f"\n[No {tool_label} command is defined for this project]\n"
+                                f"To configure a {tool_label} command, run :ViminiConfig or set '{config_key}' in the project file:\n"
+                                f"  {project_file_path}\n"
+                            )
+                            self.send_response(current_req_id, conn, result={
+                                "status": "chunk",
+                                "text": msg
+                            })
+                            responses.append(types.Part.from_function_response(
+                                name=tool_call.name,
+                                response={'result': f"The tool '{tool_call.name}' is not available for this project because no {tool_label} command is configured in project options."}
+                            ))
+                            continue
                         cmd_info = f": {cmd}" if cmd else ""
                         req_msg = f"\n[Agent requested tool execution: {tool_call.name}{cmd_info}]\n"
                         self.send_response(current_req_id, conn, result={
@@ -409,7 +444,13 @@ class ChatSession(CommSession):
                             except Exception:
                                 pass
 
-                        if is_approved:
+                        error_msg = next_params.get("error") if isinstance(next_params, dict) else None
+                        if error_msg:
+                            if "verify that the patch is properly formatted and retry" not in error_msg.lower():
+                                patch_result = f"Patch failed to apply:\n{error_msg}\nPlease verify that the patch is properly formatted and retry."
+                            else:
+                                patch_result = error_msg
+                        elif is_approved:
                             patch_result = True
                         else:
                             patch_result = "Apply patch command was refused. Do not retry and instead prompt the user for more instructions."

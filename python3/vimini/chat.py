@@ -3,6 +3,7 @@ import json
 import subprocess
 import os
 from vimini import util, context
+from vimini.common.util import get_project_config
 from vimini.code import _DIFF_SEPARATOR, _process_x_diff_chunks
 
 WAITING_MSG = "Waiting for prompt (CTRL-W q to exit)"
@@ -200,14 +201,17 @@ def submit_prompt(prompt_buf_num=None, prompt_text=None):
     except Exception as e:
         util.log_info(f"Error submitting prompt: {e}")
 
-def send_agent_approval(approved, req_id):
+def send_agent_approval(approved, req_id, error=None):
+    params = {
+        "approved": bool(approved)
+    }
+    if error is not None:
+        params["error"] = str(error)
     req = {
         "jsonrpc": "2.0",
         "id": str(req_id),
         "method": "chat",
-        "params": {
-            "approved": bool(approved)
-        }
+        "params": params
     }
     util.send_channel_request(req, True)
 
@@ -272,7 +276,7 @@ def _on_patch_buffer_closed(req_id):
 def _open_patch_buffer(temp_file, req_id):
     if not temp_file or not os.path.exists(temp_file):
         util.display_message("Error: Patch temp file does not exist.", error=True)
-        send_agent_approval(False, req_id)
+        send_agent_approval(False, req_id, error="Patch temp file does not exist. Please verify that the patch is properly formatted and retry.")
         return
 
     diff_content = ""
@@ -281,10 +285,13 @@ def _open_patch_buffer(temp_file, req_id):
             diff_content = f.read()
     except Exception as e:
         util.log_info(f"Error reading patch temp file: {e}")
+        util.display_message(f"Error reading patch temp file: {e}", error=True)
+        send_agent_approval(False, req_id, error=f"Error reading patch temp file: {e}. Please verify that the patch is properly formatted and retry.")
+        return
 
     if not diff_content.strip():
         util.display_message("Error: Patch content is empty.", error=True)
-        send_agent_approval(False, req_id)
+        send_agent_approval(False, req_id, error="Patch content is empty. Please verify that the patch is properly formatted and retry.")
         return
 
     try:
@@ -381,6 +388,7 @@ def _open_patch_buffer(temp_file, req_id):
         vim.command("redraw!")
     except Exception as e:
         util.log_info(f"Error creating patch buffer: {e}")
+        send_agent_approval(False, req_id, error=f"Error creating patch buffer: {e}. Please verify that the patch is properly formatted and retry.")
 
 def _request_tool_permission(req_id, tool, cmd=None):
     tool_label = "Build" if tool == "build_code" else "Test"
@@ -441,7 +449,18 @@ def handle_channel_response(req_id, result):
     if buffer is None:
         return
 
-    if status == "chunk":
+    if status == "thought":
+        thought_text = result.get("thought", "")
+        verbose = result.get("verbose")
+        if verbose is None:
+            try:
+                verbose = (vim.eval("get(g:, 'vimini_thinking', 'on')") == 'on')
+            except Exception:
+                verbose = True
+        if verbose and thought_text:
+            _write_to_buffer(buffer, thought_text, append_to_last=True)
+
+    elif status == "chunk":
         text = result.get("text", "")
         if text:
             _write_to_buffer(buffer, text, append_to_last=True)
@@ -471,8 +490,18 @@ def handle_channel_response(req_id, result):
         elif tool == "apply_patch":
             _open_patch_buffer(temp_file, req_id)
         elif tool in ("build_code", "test_code"):
+            tool_label = "build" if tool == "build_code" else "test"
             cmd = result.get("command")
-            approved = _request_tool_permission(req_id, tool, cmd)
+            project_root = (buffer.vars.get("vimini_project_root") if buffer else None) or util.get_git_repo_root() or os.getcwd()
+            perm = get_project_config(f"{tool_label}-permission", start_dir=project_root, default="Ask")
+            perm_val = perm.strip().lower() if isinstance(perm, str) else "ask"
+
+            if perm_val == "allow":
+                approved = True
+            elif perm_val == "deny":
+                approved = False
+            else:
+                approved = _request_tool_permission(req_id, tool, cmd)
             send_agent_approval(approved, req_id)
         else:
             send_agent_approval(False, req_id)
@@ -528,11 +557,23 @@ def _send_prompt(prompt, buffer):
     _set_waiting(buffer, True)
 
     project_root = util.get_git_repo_root() or os.getcwd()
+    verbose = False
+    try:
+        verbose = (vim.eval("get(g:, 'vimini_thinking', 'on')") == 'on')
+    except Exception:
+        verbose = True
+    temperature = None
+    try:
+        temperature = vim.eval("get(g:, 'vimini_temperature', v:null)")
+    except Exception:
+        pass
     req = {
         "jsonrpc": "2.0",
         "id": _to_str(buffer.vars.get("vimini_job_id", "")),
         "method": "chat",
         "params": {
+            "temperature": temperature,
+            "verbose": verbose,
             "prompt": prompt,
             "project_root": project_root
         }
