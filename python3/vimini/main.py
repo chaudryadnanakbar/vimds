@@ -11,6 +11,7 @@ from vimini.ripgrep import command as ripgrep_command
 from vimini.ripgrep import apply as ripgrep_apply
 from vimini.chat import chat
 from vimini.context import context_files_command, toggle_context_file, show_context_lists, confirm_context_files, files_command, restore_context_files
+from vimini.config import config_command
 
 def initialize(api_key_file, model, logfile=None):
     """
@@ -241,6 +242,9 @@ def help(command_name=None):
         "",
         ":ViminiContextFiles",
         "    Opens a file manager to manage files sent as context (g:context_files).",
+        "",
+        ":ViminiConfig",
+        "    Opens a guided editor to configure project settings (build/test commands).",
         "",
         ":ViminiReview [-c <git_objects>] [--security] [--save[=<path>]] [{prompt}]",
         "    Reviews code in current buffer or git objects.",

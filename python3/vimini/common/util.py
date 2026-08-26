@@ -7,6 +7,21 @@ import subprocess
 PROJECTS_DIR = os.path.expanduser("~/.var/vimini/projects")
 CURRENT_PROJECT_DATA_VERSION = "0.1"
 
+PROJECT_CONFIG_SCHEMA = {
+    "build-command": {
+        "label": "Build Command",
+        "description": "Shell command to compile or build the project",
+        "default": None,
+        "type": "string"
+    },
+    "test-command": {
+        "label": "Test Command",
+        "description": "Shell command to run the project test suite",
+        "default": None,
+        "type": "string"
+    }
+}
+
 def get_git_repo_root(start_dir=None):
     """
     Finds the root directory of the git repository starting from start_dir or current working directory.
@@ -64,12 +79,10 @@ def create_default_project_data():
     """
     Returns a new default project data dictionary.
     """
+    config = {k: v.get("default") for k, v in PROJECT_CONFIG_SCHEMA.items()}
     return {
         "version": CURRENT_PROJECT_DATA_VERSION,
-        "configuration": {
-            "build-command": None,
-            "test-command": None
-        },
+        "configuration": config,
         "files": []
     }
 
@@ -100,10 +113,9 @@ def upgrade_project_data(raw_data):
         config = raw_data.get("configuration", {})
         if not isinstance(config, dict):
             config = {}
-        if "build-command" not in config:
-            config["build-command"] = None
-        if "test-command" not in config:
-            config["test-command"] = None
+        for k, schema_item in PROJECT_CONFIG_SCHEMA.items():
+            if k not in config:
+                config[k] = schema_item.get("default")
         files = raw_data.get("files", [])
         if not isinstance(files, list):
             files = []

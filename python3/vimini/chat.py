@@ -467,7 +467,7 @@ def _execute_project_tool(req_id, buffer, tool, args):
         config_key = f"{tool_label}-command"
         msg = (
             f"\n[No {tool_label} command is defined for this project]\n"
-            f"To configure a {tool_label} command, set '{config_key}' in the project file:\n"
+            f"To configure a {tool_label} command, run :ViminiConfig or set '{config_key}' in the project file:\n"
             f"  {project_file_path}\n"
         )
         _write_to_buffer(buffer, msg, append_to_last=True)

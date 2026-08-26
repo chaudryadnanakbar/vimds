@@ -250,6 +250,21 @@ When you are done, simply close the window (e.g., with `:q`). A popup will ask y
 :ViminiContextFiles
 ```
 
+### `:ViminiConfig`
+
+Opens an interactive configuration editor in a new split window to configure project-specific settings (such as `build-command` and `test-command`).
+
+**How to use the configuration manager:**
+*   Move the cursor to any configuration option line.
+*   **`<Enter>` or `e`**: Opens an input prompt pre-filled with the current value to edit the option.
+*   **`d`**: Clears/unsets the option under the cursor.
+*   **`r`**: Resets all configuration options to their last saved state.
+*   **`q`**: Closes the configuration window. If modifications were made, a confirmation popup prompts to save changes permanently to `~/.var/vimini/projects/<project_name>`.
+
+```vim
+:ViminiConfig
+```
+
 ### `:ViminiReview [-c <git_objects>] [--security] [--save[=<path>]] [{prompt}]`
 
 Sends content to the Gemini model for a code review. This command has two main modes:

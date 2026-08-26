@@ -369,6 +369,20 @@ endfunction
 
 command! -nargs=0 ViminiContextFiles call ViminiContextFiles()
 
+" Expose a function to manage project configuration
+function! ViminiConfig()
+  py3 << EOF
+try:
+    from vimini import main
+    main.config_command()
+except Exception as e:
+    error_message = str(e).replace("'", "''")
+    vim.command(f"echoerr '[Vimini] Error: {error_message}'")
+EOF
+endfunction
+
+command! -nargs=0 ViminiConfig call ViminiConfig()
+
 " Expose a function for autocompletion.
 " This calls the non-blocking python function that handles the async request.
 function! ViminiAutocomplete()
