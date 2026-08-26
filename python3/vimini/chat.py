@@ -178,7 +178,12 @@ def submit_prompt(prompt_buf_num=None, prompt_text=None):
             lines = [l for l in content.split('\n') if l.strip() != HINT_MSG]
             prompt = "\n".join(lines).strip()
 
-        vim.command("stopinsert")
+        try:
+            vim.command("call feedkeys(\"\\<C-\\>\\<C-n>\", 'nx')")
+            vim.command("stopinsert")
+        except Exception as e:
+            util.log_info(f"Error exiting insert mode: {e}")
+
         try:
             vim.command(f"bwipeout! {prompt_buf.number}")
         except Exception as e:

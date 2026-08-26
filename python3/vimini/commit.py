@@ -40,6 +40,8 @@ def _stage_changes(repo_path, message="Staging changes..."):
             basename = os.path.basename(path)
             if (basename.startswith('.') or
                 basename.endswith('~') or
+                basename.endswith('.orig') or
+                basename.endswith('.rej') or
                 basename.endswith('.swp') or
                 basename.endswith('.swo') or
                 basename.endswith('.review.txt')):
