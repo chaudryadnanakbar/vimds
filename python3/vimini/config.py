@@ -157,8 +157,18 @@ def edit_config_option():
             return
 
         new_val_str = new_val.strip()
+        schema_info = PROJECT_CONFIG_SCHEMA.get(key, {})
+        schema_type = schema_info.get("type")
+
         if not new_val_str:
             _VIMINI_PENDING_PROJECT_CONFIG[key] = None
+        elif schema_type == "boolean":
+            if new_val_str.lower() in ("true", "1", "yes", "on"):
+                _VIMINI_PENDING_PROJECT_CONFIG[key] = True
+            elif new_val_str.lower() in ("false", "0", "no", "off"):
+                _VIMINI_PENDING_PROJECT_CONFIG[key] = False
+            else:
+                _VIMINI_PENDING_PROJECT_CONFIG[key] = new_val_str
         else:
             _VIMINI_PENDING_PROJECT_CONFIG[key] = new_val_str
 

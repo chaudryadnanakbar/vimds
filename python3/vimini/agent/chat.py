@@ -277,6 +277,24 @@ class ChatSession(CommSession):
 
         if not self.session:
             self.client = get_client(config=agent_config)
+            compilation_needed = get_project_config("compilation-needed", start_dir=self.project_root, default=False)
+            if compilation_needed:
+                build_test_guideline = (
+                    "4. **Build and Test Tools:** Test and build tools may be expensive "
+                    "and should be invoked only if the user instructions include a "
+                    "request to build or test changes. You can use `build_code` to "
+                    "compile/build the project and `test_code` to execute the project "
+                    "test suite to verify code changes or diagnose errors."
+                )
+            else:
+                build_test_guideline = (
+                    "4. **Build and Test Tools:** Test and build tools may be expensive "
+                    "and should be invoked only if the user instructions include a "
+                    "request to build or test changes. This project does not require "
+                    "compilation and therefore the `build_code` tool should not be executed. "
+                    "You can use `test_code` to execute the project test suite to verify "
+                    "code changes or diagnose errors."
+                )
             agent_config_obj = create_generation_config(
                 tools=agent_tools,
                 temperature=temperature,
@@ -293,7 +311,7 @@ class ChatSession(CommSession):
                     "1. **Understand Context First:** Before proposing or applying any code changes, use `list_directory` and `read_file` tools to understand the repository structure and exact file contents. Never assume or guess code.\n"
                     "2. **Use the Patch Tool Correctly:** To modify files, use the `apply_patch` tool. Provide a valid unified diff. Use file paths relative to the project root. Ensure your diff includes sufficient unmodified context lines for reliable application.\n"
                     "3. **Patch Reliability:** `apply_patch` should ideally be the final action in your response. If a patch fails due to a formatting or context mismatch, do not blindly retry the exact same patch. First, re-read the file to obtain the up-to-date content, then formulate a corrected diff.\n"
-                    "4. **Build and Test Tools:** Test and build tools may be expensive and should be invoked only if the user instructions include a request to build or test changes. You can use `build_code` to compile/build the project and `test_code` to execute the project test suite to verify code changes or diagnose errors.\n"
+                    f"{build_test_guideline}\n"
                     "5. **Limit Retries:** Avoid multiple calls to `apply_patch` for the same file in a single response. If an apply_patch command is refused, do not retry and instead prompt the user for more instructions.\n"
                     "6. **Be Concise:** Provide brief, clear explanations. Avoid unnecessary conversational filler."
                 ),

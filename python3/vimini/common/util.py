@@ -19,6 +19,12 @@ PROJECT_CONFIG_SCHEMA = {
         "description": "Shell command to run the project test suite",
         "default": None,
         "type": "string"
+    },
+    "compilation-needed": {
+        "label": "Compilation Needed",
+        "description": "Whether the project requires compilation (true/false, default false)",
+        "default": False,
+        "type": "boolean"
     }
 }
 
@@ -162,7 +168,19 @@ def get_project_config(key, project_name=None, start_dir=None, default=None):
         return default
     config = data.get("configuration", {})
     if isinstance(config, dict):
-        return config.get(key, default)
+        val = config.get(key)
+        if val is None:
+            schema_default = PROJECT_CONFIG_SCHEMA.get(key, {}).get("default")
+            val = schema_default if schema_default is not None else default
+
+        schema_info = PROJECT_CONFIG_SCHEMA.get(key, {})
+        if schema_info.get("type") == "boolean" and val is not None:
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.strip().lower() in ("true", "1", "yes", "on")
+            return bool(val)
+        return val
     return default
 
 def set_project_config(key, value, project_name=None, start_dir=None):

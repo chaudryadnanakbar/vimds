@@ -143,13 +143,14 @@ customizations.
     ```
 
 9.  **Build and Test Commands**:
-    Configure per-project shell commands for compiling/building code and running tests when invoked by chat tools (`build_code` and `test_code`). Project configuration is stored in `~/.var/vimini/projects/<project_name>`:
+    Configure per-project settings such as whether compilation is needed and shell commands for compiling/building code and running tests when invoked by chat tools (`build_code` and `test_code`). Project configuration is stored in `~/.var/vimini/projects/<project_name>`:
     ```json
     {
       "version": "0.1",
       "configuration": {
         "build-command": "make -j$(nproc)",
-        "test-command": "pytest"
+        "test-command": "pytest",
+        "compilation-needed": false
       },
       "files": []
     }
