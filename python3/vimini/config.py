@@ -146,7 +146,26 @@ def edit_config_option():
             util.display_message("No editable configuration option selected on this line.")
             return
 
+        schema_info = PROJECT_CONFIG_SCHEMA.get(key, {})
+        schema_type = schema_info.get("type")
         current_val = _VIMINI_PENDING_PROJECT_CONFIG.get(key)
+
+        if schema_type == "boolean":
+            if isinstance(current_val, bool):
+                cur_bool = current_val
+            elif isinstance(current_val, str):
+                cur_bool = current_val.strip().lower() in ("true", "1", "yes", "on")
+            elif current_val is None:
+                cur_bool = bool(schema_info.get("default", False))
+            else:
+                cur_bool = bool(current_val)
+
+            new_bool = not cur_bool
+            _VIMINI_PENDING_PROJECT_CONFIG[key] = new_bool
+            _refresh_config_buffer(win, line_num, col)
+            util.display_message(f"Set '{key}' to {repr(new_bool)}")
+            return
+
         cur_str = "" if current_val is None else str(current_val)
 
         safe_prompt = f"Enter value for {key}: ".replace("'", "''")
@@ -157,18 +176,8 @@ def edit_config_option():
             return
 
         new_val_str = new_val.strip()
-        schema_info = PROJECT_CONFIG_SCHEMA.get(key, {})
-        schema_type = schema_info.get("type")
-
         if not new_val_str:
             _VIMINI_PENDING_PROJECT_CONFIG[key] = None
-        elif schema_type == "boolean":
-            if new_val_str.lower() in ("true", "1", "yes", "on"):
-                _VIMINI_PENDING_PROJECT_CONFIG[key] = True
-            elif new_val_str.lower() in ("false", "0", "no", "off"):
-                _VIMINI_PENDING_PROJECT_CONFIG[key] = False
-            else:
-                _VIMINI_PENDING_PROJECT_CONFIG[key] = new_val_str
         else:
             _VIMINI_PENDING_PROJECT_CONFIG[key] = new_val_str
 

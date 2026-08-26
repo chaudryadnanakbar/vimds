@@ -1,59 +1,137 @@
 import vim
 import subprocess
+import json
 import shlex
 import os
 import re
-from vimini import util, context, code
+from vimini import util
 
-def _construct_review_prompt(uploaded_files, prompt, content_source_description, security_focus):
+_STREAM_FIRST_CHUNK_MAP = set()
+
+def _to_str(val):
+    if isinstance(val, bytes):
+        return val.decode('utf-8', errors='replace')
+    return str(val) if val is not None else ""
+
+def _find_buffer(req_id):
+    try:
+        for buf in vim.buffers:
+            bid = buf.vars.get("vimini_job_id")
+            if bid is not None and _to_str(bid) == str(req_id):
+                return buf
+    except Exception:
+        pass
+    return None
+
+def handle_channel_response(req_id, result):
     """
-    Constructs the prompt for the review.
+    Handles channel responses from the agent server for review requests.
+    Statuses: 'thought', 'chunk', 'completed', 'progress', 'batch_completed', 'error'
     """
-    context_files_section = ""
-    if uploaded_files:
-        context_file_names = sorted([f.display_name for f in uploaded_files])
-        file_list_str = "\n".join(f"- {name}" for name in context_file_names)
-        context_files_section = (
-            "The following files have been uploaded for context and contain the full, "
-            "up-to-date source code for the changes being reviewed:\n"
-            f"{file_list_str}\n\n"
-        )
 
-    if security_focus:
-        review_instructions = (
-            f"Please review {content_source_description} exclusively for potential security issues or hazards. "
-            "Focus on identifying vulnerabilities, insecure coding practices, and potential attack vectors. "
-            "Provide clear, actionable suggestions for mitigation. Do not comment on code style, "
-            "performance, or other non-security aspects."
-        )
-    else:
-        review_instructions = (
-            f"Please review {content_source_description} for potential issues, "
-            "improvements, best practices, and any possible bugs. "
-            "Provide a concise summary and actionable suggestions."
-        )
+    if not isinstance(result, dict):
+        return
 
-    prompt_text = (
-        f"{review_instructions}\n\n"
-        f"{context_files_section}"
-        "--- CONTENT TO REVIEW ---\n"
-        "{{REVIEW_CONTENT}}\n"
-        "--- END CONTENT TO REVIEW ---"
-        f"\n{prompt}\n"
-    )
-    return prompt_text
+    status = result.get("status")
+
+    if status == "progress":
+        msg = result.get("message", "")
+        is_err = result.get("error", False)
+        util.display_message(msg, error=is_err, history=True)
+        return
+
+    if status == "batch_completed":
+        msg = result.get("message", "All reviews completed and saved.")
+        util.display_message(msg, history=True)
+        return
+
+    buf = _find_buffer(req_id)
+    buf_num = buf.number if buf else None
+
+    if status == "thought":
+        if buf:
+            try:
+                if "[->G?]" in buf.name:
+                    buf.name = buf.name.replace("[->G?]", "[<-G]")
+                elif "[->G]" in buf.name:
+                    buf.name = buf.name.replace("[->G]", "[<-G]")
+            except Exception:
+                pass
+        thought_text = result.get("thought", "")
+        verbose = result.get("verbose")
+        if verbose is None:
+            try:
+                verbose = (vim.eval("get(g:, 'vimini_thinking', 'on')") == 'on')
+            except Exception:
+                verbose = True
+        if verbose and thought_text and buf_num:
+            util.append_to_buffer(buf_num, thought_text)
+
+    elif status in ("chunk", "tool_use_requested"):
+        if buf:
+            try:
+                spin_map = {
+                    "[->G?]": "[<-G]",
+                    "[->G]": "[<-G]",
+                    "[<-G]": "[<-\\]",
+                    "[<-\\]": "[<-|]",
+                    "[<-|]": "[<-/]",
+                    "[<-/]": "[<-G]",
+                }
+                for spin in spin_map.items():
+                    if spin[0] in buf.name:
+                        buf.name = buf.name.replace(spin[0], spin[1])
+                        break
+            except Exception:
+                pass
+
+        if buf_num:
+            if req_id not in _STREAM_FIRST_CHUNK_MAP:
+                _STREAM_FIRST_CHUNK_MAP.add(req_id)
+                util.append_to_buffer(buf_num, "\n========== REVIEW START ==========\n")
+
+            chunk_text = result.get("text", "")
+            if chunk_text:
+                util.append_to_buffer(buf_num, chunk_text)
+
+    elif status in ("completed", "terminated"):
+        _STREAM_FIRST_CHUNK_MAP.discard(req_id)
+        if buf:
+            base_buffer_name = f"[{req_id}] Vimini Review"
+            try:
+                buf.name = base_buffer_name
+            except Exception:
+                pass
+        if status == "completed":
+            util.display_message("Review completed.")
+        else:
+            util.display_message("Review terminated.", history=True)
+
+    elif status == "error":
+        _STREAM_FIRST_CHUNK_MAP.discard(req_id)
+        err_msg = result.get("error", "Unknown error")
+        if buf_num:
+            util.append_to_buffer(buf_num, f"\nError: {err_msg}")
+        util.display_message(f"Error: {err_msg}", error=True)
+
+def send_review_termination(req_id):
+    req = {
+        "jsonrpc": "2.0",
+        "id": str(req_id),
+        "method": "review",
+        "params": {
+            "terminate": True
+        }
+    }
+    util.send_channel_request(req, True)
 
 def review(prompt, git_objects=None, security_focus=False, verbose=False, temperature=None, save=False, save_path=None):
     """
-    Sends content to the Gemini API for a code review.
+    Sends content to the Gemini API for a code review via the background agent.
     If 'save' is True and 'git_objects' are provided, saves reviews to 'save_path'.
     """
     util.log_info(f"review({prompt}, git_objects='{git_objects}', security_focus={security_focus}, verbose={verbose}, temperature={temperature}, save={save}, save_path='{save_path}')")
     try:
-        client = util.get_client()
-        if not client:
-            return
-
         # --- BATCH SAVE MODE ---
         if git_objects and save:
             repo_path = util.get_git_repo_root()
@@ -61,6 +139,10 @@ def review(prompt, git_objects=None, security_focus=False, verbose=False, temper
                 return
 
             objects_to_resolve = shlex.split(git_objects)
+            for obj in objects_to_resolve:
+                if obj.startswith('-'):
+                    util.display_message("Security error: Git options (like flags starting with '-') are not allowed.", error=True)
+                    return
 
             # Check if a range is specified. If not, we don't want to walk the whole history.
             rev_list_args = []
@@ -100,106 +182,34 @@ def review(prompt, git_objects=None, security_focus=False, verbose=False, temper
                         util.display_message(f"Error creating directory {target_dir}: {e}", error=True)
                         return
 
-            total_commits = len(commit_list)
-            current_review_accumulator = []
+            job_name = f"Review batch: {git_objects} {prompt}"
+            job_id = str(util.reserve_next_job_id(job_name))
 
-            def process_batch_commit(index):
-                nonlocal current_review_accumulator
-                if index >= total_commits:
-                    util.display_message("All reviews completed and saved.", history=True)
-                    return
+            util.display_message("Processing batch review via agent... (Async)")
 
-                commit_sha = commit_list[index]
-                patch_num = index + 1
-                status_msg = f"Reviewing commit {patch_num}/{total_commits}: {commit_sha[:7]}... (Async)"
-                util.display_message(status_msg)
+            req = {
+                "jsonrpc": "2.0",
+                "id": str(job_id),
+                "method": "review",
+                "params": {
+                    "batch": True,
+                    "prompt": prompt,
+                    "security_focus": security_focus,
+                    "verbose": verbose,
+                    "temperature": temperature,
+                    "project_root": repo_path,
+                    "commit_list": commit_list,
+                    "target_dir": target_dir
+                }
+            }
 
-                # Reset accumulator
-                current_review_accumulator = []
-
-                # Get content (Synchronous for now to setup the prompt)
-                cmd_show = ['git', '-C', repo_path, 'show', commit_sha]
-                result_show = subprocess.run(cmd_show, capture_output=True, text=True, check=False)
-                if result_show.returncode != 0:
-                    error_message = (result_show.stderr or "git show failed.").strip()
-                    util.display_message(f"Skipping {commit_sha[:7]}: {error_message}", error=True, history=True)
-                    process_batch_commit(index + 1)
-                    return
-                review_content_single = result_show.stdout
-
-                # Get context
-                uploaded_files_single = []
-                cmd_files = ['git', '-C', repo_path, 'show', '--name-only', '--format=', commit_sha]
-                result_files = subprocess.run(cmd_files, capture_output=True, text=True, check=False)
-                if result_files.returncode == 0:
-                    changed_files_relative = [f for f in result_files.stdout.strip().split('\n') if f]
-                    if changed_files_relative:
-                        context_files_to_upload = [os.path.join(repo_path, rel_path) for rel_path in changed_files_relative]
-                        uploaded_files_single = context.upload_context_files(client, file_paths_to_include=context_files_to_upload) or []
-
-                # Generate Prompt
-                prompt_template = _construct_review_prompt(
-                    uploaded_files_single, prompt,
-                    f"the output of `git show {commit_sha[:7]}`",
-                    security_focus
-                )
-                prompt_text = prompt_template.replace("{{REVIEW_CONTENT}}", review_content_single)
-                full_prompt = [prompt_text, *uploaded_files_single]
-
-                def on_chunk(text):
-                    current_review_accumulator.append(text)
-
-                def on_finish():
-                    # Save
-                    status_msg = ""
-                    try:
-                        subject_cmd = ['git', '-C', repo_path, 'log', '-1', '--pretty=%s', commit_sha]
-                        subject_result = subprocess.run(subject_cmd, capture_output=True, text=True, check=False)
-                        subject = subject_result.stdout.strip() if subject_result.returncode == 0 else "commit"
-
-                        sanitized_subject = re.sub(r'[^a-zA-Z0-9]+', '-', subject).strip('-').lower()
-                        sanitized_subject = sanitized_subject[:50]
-
-                        filename = f"{patch_num:04d}-{sanitized_subject}.review.txt"
-                        filepath = os.path.join(target_dir, filename)
-
-                        content = "".join(current_review_accumulator)
-                        with open(filepath, "w", encoding='utf-8') as f:
-                            f.write(content)
-                        status_msg = f"Saved review to {filename}"
-                    except Exception as e:
-                        status_msg = f"Error saving {filename}: {e}"
-
-                    # Trigger next commit review
-                    process_batch_commit(index + 1)
-                    return status_msg
-
-                def on_error(msg):
-                    process_batch_commit(index + 1)
-                    return f"Error reviewing {commit_sha[:7]}: {msg}"
-
-                kwargs = util.create_generation_kwargs(
-                    contents=full_prompt,
-                    temperature=temperature,
-                    verbose=verbose
-                )
-
-                job_name = f"Review: {commit_sha[:7]} {prompt}"
-
-                util.start_async_job(client, kwargs, {
-                    'on_chunk': on_chunk,
-                    'on_finish': on_finish,
-                    'on_error': on_error,
-                    'status_message': status_msg
-                }, job_name=job_name)
-
-            process_batch_commit(0)
+            util.send_channel_request(req)
             return
 
         # --- INTERACTIVE MODE (ASYNC) ---
         review_content = ""
         content_source_description = ""
-        uploaded_files = []
+        project_root = util.get_git_repo_root() or os.getcwd()
 
         if git_objects:
             repo_path = util.get_git_repo_root()
@@ -221,16 +231,6 @@ def review(prompt, git_objects=None, security_focus=False, verbose=False, temper
                 util.display_message(f"Git error: {error_message}", error=True)
                 return
             review_content = result.stdout
-
-            util.display_message("Getting changed files for context...")
-            cmd_files = ['git', '-C', repo_path, 'show', '--name-only', '--format='] + objects_to_show
-            result_files = subprocess.run(cmd_files, capture_output=True, text=True, check=False)
-            if result_files.returncode == 0:
-                changed_files_relative = [f for f in result_files.stdout.strip().split('\n') if f]
-                if changed_files_relative:
-                    context_files_to_upload = [os.path.join(repo_path, rel_path) for rel_path in changed_files_relative]
-                    uploaded_files = context.upload_context_files(client, file_paths_to_include=context_files_to_upload) or []
-
             content_source_description = f"the output of `git show {git_objects}`"
         else:
             review_content = "\n".join(vim.current.buffer[:])
@@ -242,86 +242,52 @@ def review(prompt, git_objects=None, security_focus=False, verbose=False, temper
             return
 
         job_name = f"Review: {git_objects if git_objects else 'current buffer'} {prompt}"
-        job_id = util.reserve_next_job_id(job_name)
+        job_id = str(util.reserve_next_job_id(job_name))
 
         util.new_split()
         base_buffer_name = f"[{job_id}] Vimini Review"
         safe_name = f"{base_buffer_name} [->G?]".replace(" ", "\\ ")
-        vim.command(f"file {safe_name}")
+        vim.command(f"silent keepalt file {safe_name}")
         vim.command('setlocal buftype=nofile')
         vim.command('setlocal bufhidden=wipe')
         vim.command('setlocal noswapfile')
         vim.command('setlocal filetype=markdown')
+        vim.command("highlight default ViminiService ctermfg=Green guifg=Green cterm=italic gui=italic")
+        vim.command("syntax match ViminiService '^\\[Agent requested tool execution: .*\\]'")
+        vim.command(f"autocmd BufUnload <buffer> py3 from vimini.review import send_review_termination; send_review_termination('{job_id}')")
 
         review_buffer = vim.current.buffer
         review_buf_num = review_buffer.number
 
-        vim.command(f"let b:vimini_job_id = '{job_id}'")
+        review_buffer.vars["vimini_job_id"] = str(job_id)
 
-        context_file_names = sorted([f.display_name for f in uploaded_files])
-        util.append_job_summary(review_buf_num, job_id, prompt, context_file_names)
+        util.append_job_summary(review_buf_num, job_id, prompt, [])
 
         # Insert Git Diff Target if applicable
         if git_objects and review_content:
-             separator_start = "========== GIT DIFF TARGET START =========="
-             separator_end = "========== GIT DIFF TARGET END =========="
-             util.append_to_buffer(review_buf_num, f"\n{separator_start}\n{review_content}\n{separator_end}\n")
+            separator_start = "========== GIT DIFF TARGET START =========="
+            separator_end = "========== GIT DIFF TARGET END =========="
+            util.append_to_buffer(review_buf_num, f"\n{separator_start}\n{review_content}\n{separator_end}\n")
 
-        # Prepare Async Job
-        prompt_template = _construct_review_prompt(uploaded_files, prompt, content_source_description, security_focus)
-        prompt_text = prompt_template.replace("{{REVIEW_CONTENT}}", review_content)
-        full_prompt = [prompt_text, *uploaded_files]
+        util.display_message("Processing review via agent... (Async)")
 
-        kwargs = util.create_generation_kwargs(
-            contents=full_prompt,
-            temperature=temperature,
-            verbose=verbose
-        )
+        req = {
+            "jsonrpc": "2.0",
+            "id": str(job_id),
+            "method": "review",
+            "params": {
+                "batch": False,
+                "prompt": prompt,
+                "review_content": review_content,
+                "content_source_description": content_source_description,
+                "security_focus": security_focus,
+                "verbose": verbose,
+                "temperature": temperature,
+                "project_root": project_root
+            }
+        }
 
-        started_receiving = False
-
-        def update_status_receiving():
-            nonlocal started_receiving
-            if not started_receiving:
-                started_receiving = True
-                try:
-                    review_buffer.name = f"{base_buffer_name} [<-G]"
-                except Exception:
-                    pass
-
-        is_first_chunk = True
-
-        def on_chunk(text):
-            nonlocal is_first_chunk
-            update_status_receiving()
-            if is_first_chunk:
-                # Put a new terminator line that indicates where the actual review starts
-                util.append_to_buffer(review_buf_num, "\n========== REVIEW START ==========\n")
-                is_first_chunk = False
-            util.append_to_buffer(review_buf_num, text)
-
-        def on_thought(text):
-            update_status_receiving()
-            if verbose:
-                util.append_to_buffer(review_buf_num, text)
-
-        def on_finish():
-            try:
-                review_buffer.name = base_buffer_name
-            except Exception:
-                pass
-            return "Review completed."
-
-        def on_error(msg):
-            return f"Error: {msg}"
-
-        util.display_message("Processing... (Async)")
-        util.start_async_job(client, kwargs, {
-            'on_chunk': on_chunk,
-            'on_thought': on_thought,
-            'on_finish': on_finish,
-            'on_error': on_error
-        }, job_id=job_id)
+        util.send_channel_request(req)
 
     except FileNotFoundError:
         util.display_message("Error: `git` command not found. Is it in your PATH?", error=True)

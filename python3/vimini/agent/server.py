@@ -128,6 +128,9 @@ def get_session_class(method):
     if method == "code":
         from vimini.agent.code import CodeSession
         return CodeSession
+    if method == "review":
+        from vimini.agent.review import ReviewSession
+        return ReviewSession
     return None
 
 def cleanup_sessions():

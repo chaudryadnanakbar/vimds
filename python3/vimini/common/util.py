@@ -220,3 +220,58 @@ def get_relative_path(file_path, repo_name=None, git_root=None):
 
     # Fallback for files not in git repo or home, or on different drives on Windows.
     return os.path.basename(abs_path)
+
+def list_directory(directory_path=".", project_root=None):
+    try:
+        if not project_root:
+            project_root = get_project_root()
+        else:
+            project_root = os.path.realpath(project_root)
+        target_path = os.path.realpath(os.path.join(project_root, directory_path))
+
+        try:
+            if os.path.commonpath([project_root, target_path]) != project_root:
+                return "Security error: Cannot list directories above the project directory."
+        except ValueError:
+            return "Security error: Path resolution failed or invalid cross-drive path."
+
+        if not os.path.exists(target_path):
+            return f"Error: Directory '{directory_path}' does not exist."
+        if not os.path.isdir(target_path):
+            return f"Error: Path '{directory_path}' is not a directory."
+
+        entries = os.listdir(target_path)
+        res = []
+        for entry in sorted(entries):
+            full = os.path.join(target_path, entry)
+            if os.path.isdir(full):
+                res.append(f"{entry}/")
+            else:
+                res.append(entry)
+        return "\n".join(res)
+    except Exception as e:
+        return f"Error listing directory: {e}"
+
+def read_file(filepath, project_root=None):
+    try:
+        if not project_root:
+            project_root = get_project_root()
+        else:
+            project_root = os.path.realpath(project_root)
+        target_path = os.path.realpath(os.path.join(project_root, filepath))
+
+        try:
+            if os.path.commonpath([project_root, target_path]) != project_root:
+                return "Security error: Cannot read files above the project directory."
+        except ValueError:
+            return "Security error: Path resolution failed or invalid cross-drive path."
+
+        if not os.path.exists(target_path):
+            return f"Error: File '{filepath}' does not exist."
+        if not os.path.isfile(target_path):
+            return f"Error: Path '{filepath}' is not a regular file."
+
+        with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {e}"

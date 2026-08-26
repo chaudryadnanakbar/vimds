@@ -11,7 +11,9 @@ from vimini.common.util import (
     get_project_root,
     get_project_name,
     get_project_config,
-    get_project_data_file_path
+    get_project_data_file_path,
+    list_directory,
+    read_file
 )
 from vimini.agent.comms import CommSession
 from vimini.common.genai import get_client, load_api_key, create_generation_config
@@ -83,60 +85,12 @@ agent_tools = [
     )
 ]
 
-def list_directory(directory_path=".", project_root=None):
-    try:
-        if not project_root:
-            project_root = get_project_root()
-        target_path = os.path.realpath(os.path.join(project_root, directory_path))
-
-        try:
-            if os.path.commonpath([project_root, target_path]) != project_root:
-                return "Security error: Cannot list directories above the project directory."
-        except ValueError:
-            return "Security error: Path resolution failed or invalid cross-drive path."
-
-        if not os.path.exists(target_path):
-            return f"Error: Directory '{directory_path}' does not exist."
-        if not os.path.isdir(target_path):
-            return f"Error: Path '{directory_path}' is not a directory."
-
-        entries = os.listdir(target_path)
-        res = []
-        for entry in sorted(entries):
-            full = os.path.join(target_path, entry)
-            if os.path.isdir(full):
-                res.append(f"{entry}/")
-            else:
-                res.append(entry)
-        return "\n".join(res)
-    except Exception as e:
-        return f"Error listing directory: {e}"
-
-def read_file(filepath, project_root=None):
-    try:
-        if not project_root:
-            project_root = get_project_root()
-        target_path = os.path.realpath(os.path.join(project_root, filepath))
-
-        try:
-            if os.path.commonpath([project_root, target_path]) != project_root:
-                return "Security error: Cannot read files above the project directory."
-        except ValueError:
-            return "Security error: Path resolution failed or invalid cross-drive path."
-
-        if not os.path.exists(target_path):
-            return f"Error: File '{filepath}' does not exist."
-        if not os.path.isfile(target_path):
-            return f"Error: Path '{filepath}' is not a regular file."
-
-        with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
-            return f.read()
-    except Exception as e:
-        return f"Error reading file: {e}"
 
 def validate_patch_is_safe(temp_file_path, project_root=None):
     if not project_root:
         project_root = get_project_root()
+    else:
+        project_root = os.path.realpath(project_root)
 
     if not temp_file_path or not os.path.exists(temp_file_path):
         return False, f"Temp file does not exist: {temp_file_path}"
