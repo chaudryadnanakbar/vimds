@@ -1,3 +1,11 @@
+#Vimin: DeepSeek for Vim
+
+This is forked project and orginial file is kep as it is. This project works great but i was more interested in a part of it. Wanted simpler Code help and debugging with AI. Google had a limit of 20 queries per day so switched to Deepseek. More over added support for Screen shots that helped debug many issues. I liked the interface but need to have support for Deepseek so came up with and idea to fork and make it work. 
+
+
+
+
+
 # Vimini: Google Gemini Integration for Vim
 
 Vimini is a Vim plugin that provides seamless integration with Google's
