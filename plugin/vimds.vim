@@ -19,11 +19,14 @@ let g:loaded_vimds = 1
 " API Key file path (default: ~/.config/vimds.token)
 let s:api_key_file = expand('~/.config/vimds.token')
 
-" Model name (default: deepseek-coder)
-let g:vimds_model = get(g:, 'vimds_model', 'deepseek-coder')
+" Model name - Using FREE model by default
+let g:vimds_model = get(g:, 'vimds_model', 'deepseek/deepseek-r1:free')
 
 " Temperature for generation (0.0 to 2.0, default: null)
 let g:vimds_temperature = get(g:, 'vimds_temperature', v:null)
+
+" Max tokens for responses (reasonable default to save credits)
+let g:vimds_max_tokens = get(g:, 'vimds_max_tokens', 500)
 
 " Split method for new windows ('vertical' or 'horizontal')
 let g:vimds_split_method = get(g:, 'vimds_split_method', 'vertical')
@@ -40,14 +43,14 @@ let g:vimds_review_path = get(g:, 'vimds_review_path', '')
 " Thinking state ('on' or 'off')
 let g:vimds_thinking = get(g:, 'vimds_thinking', 'off')
 
-" Autocomplete state ('on' or 'off')
+" Autocomplete state ('on' or 'off') - DISABLED by default
 let g:vimds_autocomplete = get(g:, 'vimds_autocomplete', 'off')
 
 " Project root for Git operations
 let g:vimds_project_root = get(g:, 'vimds_project_root', '')
 
 " Timeout for API calls
-let g:vimds_timeout = get(g:, 'vimds_timeout', 15)
+let g:vimds_timeout = get(g:, 'vimds_timeout', 30)
 
 " Window direction for splits
 let g:vimds_window_direction = get(g:, 'vimds_window_direction', 'vertical')
@@ -61,8 +64,14 @@ let g:vimds_active_attachment_name = get(g:, 'vimds_active_attachment_name', '')
 " Agent Channel (internal)
 let g:vimds_channel = get(g:, 'vimds_channel', v:null)
 
-" API URL for DeepSeek
-let g:deepseek_api_url = get(g:, 'deepseek_api_url', 'https://api.deepseek.com/v1')
+" API URL for OpenRouter
+let g:vimds_base_url = get(g:, 'vimds_base_url', 'https://openrouter.ai/api/v1')
+
+" Chat state
+let g:vimds_chat_open = 0
+
+" Disable debug mode
+set debug=
 
 "=============================================================================
 " Plugin Setup
@@ -78,9 +87,41 @@ let s:socket_path = ''
 function! VimdsChannelCallback(channel, msg)
   py3 << EOF
 try:
+    import json
     from vimds import main
+    
     msg = vim.eval('a:msg')
-    main.handle_channel_message(msg)
+    
+    # Try to parse the response
+    if isinstance(msg, str):
+        try:
+            data = json.loads(msg)
+        except:
+            data = msg
+    else:
+        data = msg
+    
+    # Handle the response
+    if isinstance(data, dict):
+        if 'response' in data:
+            # Add AI response to chat buffer
+            response = data['response'].replace("'", "''")
+            response = response.replace('"', '&quot;')
+            try:
+                vim.command("call cursor(line('$')-2, 1)")
+                vim.command("delete")
+                vim.command("call cursor(line('$')-1, 1)")
+                vim.command("delete")
+                vim.command(f"call append(line('$'), 'AI: {response}')")
+                vim.command("call append(line('$'), '')")
+                vim.command("call cursor(line('$'), 1)")
+            except Exception as e:
+                print(f"Error adding response: {e}")
+        elif 'error' in data:
+            error = data['error'].replace("'", "''")
+            vim.command(f"echoerr '[VimDS] Error: {error}'")
+    else:
+        pass
 except Exception as e:
     error_message = str(e).replace("'", "''")
     vim.command(f"echoerr '[VimDS] Channel callback error: {error_message}'")
@@ -102,7 +143,8 @@ try:
     api_key_file = vim.eval('s:api_key_file')
     model = vim.eval('g:vimds_model')
     log_file = vim.eval('g:vimds_log_file') if vim.eval('g:vimds_logging') == 'on' else None
-    main.initialize(api_key_file=api_key_file, model=model, logfile=log_file)
+    max_tokens = int(vim.eval('g:vimds_max_tokens'))
+    main.initialize(api_key_file=api_key_file, model=model, logfile=log_file, max_tokens=max_tokens)
     socket_path = main.start_agent()
     if socket_path:
         vim.command(f"let s:socket_path = '{socket_path}'")
@@ -192,6 +234,132 @@ endfunction
 call VimdsInternalStartStatusTimer()
 
 "=============================================================================
+" Chat Window Functions
+"=============================================================================
+
+" Function to open chat window
+function! VimdsChat()
+  " Check if chat window already exists
+  let l:bufname = 'VimDS-Chat'
+  let l:bufnr = bufnr(l:bufname)
+  
+  if l:bufnr != -1 && buflisted(l:bufnr)
+    " Switch to existing chat buffer
+    execute 'buffer' l:bufnr
+    let g:vimds_chat_open = 1
+    return
+  endif
+  
+  " Create new chat buffer
+  execute 'new ' . l:bufname
+  
+  " Set buffer options
+  setlocal buftype=nofile
+  setlocal bufhidden=wipe
+  setlocal noswapfile
+  setlocal filetype=vimds
+  setlocal modifiable
+  setlocal wrap
+  setlocal linebreak
+  
+  " Add header
+  call setline(1, '╔═══════════════════════════════════════════════════════════╗')
+  call setline(2, '║  VimDS - DeepSeek Chat (FREE Model)                    ║')
+  call setline(3, '║  Type your message below and press Enter                ║')
+  call setline(4, '║  Press Esc or q to close                               ║')
+  call setline(5, '╚═══════════════════════════════════════════════════════════╝')
+  call setline(6, '')
+  call setline(7, '')
+  
+  " Move cursor to the end
+  call cursor(line('$'), 1)
+  
+  " Set up key mappings for this buffer
+  nnoremap <buffer> <CR> :call <SID>VimdsChatSubmit()<CR>
+  nnoremap <buffer> <Esc> :call <SID>VimdsChatClose()<CR>
+  nnoremap <buffer> q :call <SID>VimdsChatClose()<CR>
+  
+  " Set up insert mode mapping
+  inoremap <buffer> <CR> <Esc>:call <SID>VimdsChatSubmit()<CR>
+  
+  let g:vimds_chat_open = 1
+  echo "[VimDS] Chat opened. Type your message and press Enter."
+endfunction
+
+" Function to close chat window
+function! s:VimdsChatClose()
+  let g:vimds_chat_open = 0
+  bdelete
+  echo "[VimDS] Chat closed"
+endfunction
+
+" Function to handle chat submission
+function! s:VimdsChatSubmit()
+  " Get the current line content
+  let l:line = getline('.')
+  
+  " If line is empty or is a separator, do nothing
+  if l:line == '' || l:line =~ '^---' || l:line =~ '^AI:' || l:line =~ '^You:'
+    return
+  endif
+  
+  " Save the user message
+  let l:user_msg = l:line
+  
+  " Clear the current line
+  call setline('.', '')
+  
+  " Add user message with separator
+  call append(line('.'), '--- You: ' . l:user_msg)
+  call append(line('.') + 1, '')
+  
+  " Move cursor to the end
+  call cursor(line('$'), 1)
+  
+  " Add a waiting message
+  call append(line('$'), 'AI: Thinking...')
+  call append(line('$'), '')
+  call cursor(line('$') - 1, 1)
+  
+  " Send to Python backend via the channel
+  if exists('g:vimds_channel') && type(g:vimds_channel) == v:t_channel && ch_status(g:vimds_channel) ==# 'open'
+    let l:request = {'command': 'submit', 'message': l:user_msg}
+    call ch_sendexpr(g:vimds_channel, l:request)
+  else
+    " Fallback: Direct Python call
+    py3 << EOF
+try:
+    import json
+    from vimds import main
+    
+    msg = vim.eval('l:user_msg')
+    
+    # Process the message
+    data = {'command': 'submit', 'message': msg}
+    result = main._process_message(json.dumps(data))
+    
+    if result and isinstance(result, dict):
+        if 'response' in result:
+            # Remove the "Thinking..." line
+            vim.command("call cursor(line('$')-2, 1)")
+            vim.command("delete")
+            vim.command("call cursor(line('$')-1, 1)")
+            vim.command("delete")
+            # Add the response
+            response = result['response'].replace("'", "''")
+            vim.command(f"call append(line('$'), 'AI: {response}')")
+            vim.command("call append(line('$'), '')")
+            vim.command("call cursor(line('$'), 1)")
+        elif 'error' in result:
+            vim.command(f"echoerr '[VimDS] Error: {result['error']}'")
+except Exception as e:
+    error_message = str(e).replace("'", "''")
+    vim.command(f"echoerr '[VimDS] Error: {error_message}'")
+EOF
+  endif
+endfunction
+
+"=============================================================================
 " Command Definitions
 "=============================================================================
 
@@ -214,32 +382,13 @@ endfunction
 command! VimdsListModels call VimdsListModels()
 
 " Chat with DeepSeek
-function! VimdsChat()
-  py3 << EOF
-try:
-    from vimds import main
-    main.chat()
-except Exception as e:
-    error_message = str(e).replace("'", "''")
-    vim.command(f"echoerr '[VimDS] Error: {error_message}'")
-EOF
-endfunction
-
 command! VimdsChat call VimdsChat()
 
-" Submit message in chat window
-function! VimdsSubmit()
-  py3 << EOF
-try:
-    from vimds import main
-    main.submit()
-except Exception as e:
-    error_message = str(e).replace("'", "''")
-    vim.command(f"echoerr '[VimDS] Error: {error_message}'")
-EOF
-endfunction
+" Close chat
+command! VimdsChatClose call s:VimdsChatClose()
 
-command! VimdsSubmit call VimdsSubmit()
+" Submit message in chat
+command! VimdsSubmit call s:VimdsChatSubmit()
 
 " Toggle thinking on/off
 function! VimdsThinking(...)
@@ -282,9 +431,9 @@ try:
     log_state = vim.eval('g:vimds_logging')
     if log_state == 'on':
         log_file = vim.eval('g:vimds_log_file')
-        main.logging(log_file)
+        main.set_logging(log_file)
     else:
-        main.logging()
+        main.set_logging()
 except Exception as e:
     error_message = str(e).replace("'", "''")
     vim.command(f"echoerr '[VimDS] Error setting log state: {error_message}'")
@@ -496,76 +645,46 @@ endfunction
 
 command! -nargs=0 VimdsConfig call VimdsConfig()
 
-" Autocomplete
+"=============================================================================
+" Autocomplete - DISABLED
+"=============================================================================
+
+" Autocomplete function (disabled to prevent errors)
 function! VimdsAutocomplete()
-  py3 << EOF
-try:
-    from vimds import main
-    main.autocomplete()
-except Exception as e:
-    error_message = str(e).replace("'", "''")
-    vim.command(f"echoerr '[VimDS] Error: {error_message}'")
-EOF
+  return
 endfunction
 
 let s:autocomplete_timer = -1
 
 function! VimdsToggleAutocomplete(...)
-  let l:option = get(a:, 1, '')
-
-  if !empty(l:option)
-    if l:option ==# 'on' || l:option ==# 'off'
-      let g:vimds_autocomplete = l:option
-    else
-      echoerr "[VimDS] Invalid argument for VimdsToggleAutocomplete. Use 'on' or 'off'."
-      return
-    endif
-  else
-    let g:vimds_autocomplete = g:vimds_autocomplete ==# 'on' ? 'off' : 'on'
-  endif
-
-  echo "[VimDS] Autocomplete is now " . g:vimds_autocomplete
+  let g:vimds_autocomplete = 'off'
+  echo "[VimDS] Autocomplete is disabled"
 endfunction
 
-command! -nargs=? VimdsToggleAutocomplete call VimdsToggleAutocomplete(<f-args>)
-
 function! s:CancelAutocomplete()
-  py3 << EOF
-try:
-    from vimds import main
-    main.cancel_autocomplete()
-except Exception:
-    pass
-EOF
+  return
 endfunction
 
 function! s:StopAutocompleteTimer()
-  if exists('s:autocomplete_timer') && s:autocomplete_timer != -1
-    call timer_stop(s:autocomplete_timer)
-    let s:autocomplete_timer = -1
-  endif
-  call s:CancelAutocomplete()
+  return
 endfunction
 
 function! s:ResetAutocompleteTimer()
-  call s:StopAutocompleteTimer()
-  if g:vimds_autocomplete ==# 'on' && mode() ==# 'i'
-    let s:autocomplete_timer = timer_start(100, 's:TriggerAutocomplete')
-  endif
+  return
 endfunction
 
 function! s:TriggerAutocomplete(timer)
-  let s:autocomplete_timer = -1
-  if g:vimds_autocomplete ==# 'on' && mode() ==# 'i'
-    call VimdsAutocomplete()
-  endif
+  return
 endfunction
 
+" Clear autocomplete autocmds
 augroup vimds_autocomplete
   autocmd!
-  autocmd TextChangedI * call s:ResetAutocompleteTimer()
-  autocmd InsertLeave * call s:StopAutocompleteTimer()
 augroup END
+
+"=============================================================================
+" Ripgrep Functions
+"=============================================================================
 
 " Ripgrep search
 function! s:VimdsRipGrep(q_args)
@@ -682,7 +801,7 @@ function! VimdsVisualCode(prompt)
     let @@ = l:saved_reg
     
     " 4. Open the chat window
-    execute 'VimdsChat'
+    call VimdsChat()
     
     " 5. Paste the instructions and the exact selection into the AI scratchpad
     call append(line('$'), 'Context code block:')
@@ -732,11 +851,14 @@ function! VimdsAttachFile(file_path)
     echo "File attached successfully!"
 endfunction
 
+" Create a user command that autocompletes filenames as you type
+command! -nargs=1 -complete=file VimdsAttach call VimdsAttachFile(<q-args>)
+
 "=============================================================================
-" Key Mappings and Autocommands
+" Key Mappings
 "=============================================================================
 
-" Normal mode: Press \c to instantly open or jump to AI chat split
+" Normal mode: Press \c to instantly open or jump to AI chat
 nnoremap <leader>c :VimdsChat<CR>
 
 " Visual mode: Press \a to send selected text to AI
@@ -745,8 +867,17 @@ vnoremap <leader>a :<C-u>call VimdsVisualCode(input("AI Instructions: "))<CR>
 " Normal mode: Press \f to trigger file attachment picker
 nnoremap <leader>f :VimdsAttach 
 
+"=============================================================================
+" Autocommands
+"=============================================================================
+
 " Inside the AI Chat Window: Press Enter on an empty line to instantly submit
-autocmd FileType vimds nnoremap <buffer> <CR> :VimdsSubmit<CR>
+augroup vimds_chat_autocmd
+  autocmd!
+  autocmd FileType vimds nnoremap <buffer> <CR> :VimdsSubmit<CR>
+  autocmd FileType vimds nnoremap <buffer> q :VimdsChatClose<CR>
+  autocmd FileType vimds nnoremap <buffer> <Esc> :VimdsChatClose<CR>
+augroup END
 
 "=============================================================================
 " Shutdown
@@ -781,7 +912,7 @@ augroup END
 
 " Command completion for VimDS commands
 function! s:VimdsComplete(ArgLead, CmdLine, CursorPos)
-  let l:commands = ['VimdsListModels', 'VimdsChat', 'VimdsSubmit', 'VimdsThinking', 
+  let l:commands = ['VimdsListModels', 'VimdsChat', 'VimdsChatClose', 'VimdsSubmit', 'VimdsThinking', 
                    \ 'VimdsToggleLogging', 'VimdsCode', 'VimdsApply',
                    \ 'VimdsReview', 'VimdsDiff', 'VimdsCommit',
                    \ 'VimdsFiles', 'VimdsContextFiles', 'VimdsConfig',
@@ -795,5 +926,4 @@ endfunction
 " End of Plugin
 "=============================================================================
 
-echo "[VimDS] Plugin loaded successfully!"
-
+echo "[VimDS] Plugin loaded successfully! (Using FREE models)"
