@@ -1,4 +1,4 @@
-*vimini.txt*    For My Awesome Vim Plugin    Last change: 2023 Oct 27
+*vimini.txt*    For My Awesome Vim Deepseek Plugin    Last change: 2026 Aug 29
 
 ==============================================================================
 CONTENTS                                                      *vimini*
@@ -11,7 +11,16 @@ CONTENTS                                                      *vimini*
 ==============================================================================
 INTRODUCTION                                          *vimini-introduction*
 
-This is a Vim plugin to use Gemini via APIs written in Python 3.
+This was a Vim plugin to use Gemini via APIs written in Python 3. I plan to make
+it for a deepseek api with C based agent , rest of the protocols and functions will
+be kep intact. Please check the main Architecture Doc . Will keep it intact onyl change 
+what is needed.
+
+First Phase make a simulated one then replace with configrable one to allow connection 
+to any of AI models. 
+
+To Keep it simple the UI layouts and functions will remain same as in the original one 
+
 
 ==============================================================================
 USAGE                                                         *vimini-usage*
