@@ -1,4 +1,4 @@
-" VimDS: DeepSeek Integration for Vim
+" VimDS: DeepSeek Integration for Vim (via OpenRouter)
 " Derived from simo5/vimini
 " Maintainer: Adnan Akbar <chaudry.adnan.akbar@gmail.com>
 " Version: 1.0.0
@@ -13,13 +13,26 @@ endif
 let g:loaded_vimds = 1
 
 "=============================================================================
+" DISABLE DEBUG MODE
+"=============================================================================
+
+" Completely disable debug mode to prevent "End of function" messages
+set debug=
+set verbose=0
+
+" Also disable debug mode for autocommands
+if exists('&debug')
+  set debug=
+endif
+
+"=============================================================================
 " Configuration Defaults
 "=============================================================================
 
 " API Key file path (default: ~/.config/vimds.token)
 let s:api_key_file = expand('~/.config/vimds.token')
 
-" Model name - Using FREE model by default
+" Model name - Using deepseek-r1:free which is confirmed to work
 let g:vimds_model = get(g:, 'vimds_model', 'deepseek/deepseek-r1:free')
 
 " Temperature for generation (0.0 to 2.0, default: null)
@@ -49,8 +62,8 @@ let g:vimds_autocomplete = get(g:, 'vimds_autocomplete', 'off')
 " Project root for Git operations
 let g:vimds_project_root = get(g:, 'vimds_project_root', '')
 
-" Timeout for API calls
-let g:vimds_timeout = get(g:, 'vimds_timeout', 30)
+" Timeout for API calls (increased for reasoning model)
+let g:vimds_timeout = get(g:, 'vimds_timeout', 60)
 
 " Window direction for splits
 let g:vimds_window_direction = get(g:, 'vimds_window_direction', 'vertical')
