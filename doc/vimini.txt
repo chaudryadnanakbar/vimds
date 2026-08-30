@@ -21,6 +21,16 @@ to any of AI models.
 
 To Keep it simple the UI layouts and functions will remain same as in the original one 
 
+Step 1: Copy the vim plugin vimini.vim t vimdeepseek.vim and duplicate the plugin 
+
+Step 2. Connect all the functions to vim and run in simulation mode
+
+Step 3. Replace the agent written in python3 with C based actual service 
+
+Step 4. Debug and test and make it awesome
+
+
+
 
 ==============================================================================
 USAGE                                                         *vimini-usage*
