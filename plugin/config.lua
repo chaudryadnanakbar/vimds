@@ -35,10 +35,48 @@ M.socket = {
   auto_start = false,
 }
 
-M.agent = {
+-- Add to config.lua
+-- ============================================
+-- Logging Settings
+-- ============================================
+M.logging = {
   enabled = true,
-  default = "chat",
-  timeout = 5,
+  level = "info",  -- debug, info, warn, error
+  max_size = 10 * 1024 * 1024, -- 10MB
+  file = os.getenv("HOME") .. "/.vimds_agent.log",
+}
+
+-- ============================================
+-- Agent Configuration
+-- ============================================
+M.agent = {
+  -- Which agent to use by default
+  -- Options: "chat", "openai", "webhook", "custom", "deepseek"
+  default = "deepseek",
+  
+  -- Agent-specific settings
+  providers = {
+    openai = {
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      model = "gpt-3.5-turbo",
+      max_tokens = 500,
+      temperature = 0.7,
+    },
+    webhook = {
+      url = os.getenv("WEBHOOK_URL") or "http://localhost:3000/webhook",
+      method = "POST",
+    },
+    custom = {
+      url = os.getenv("CUSTOM_API_URL") or "",
+      method = "POST",
+      headers = {},
+    },
+    deepseek = {
+      model = "deepseek/deepseek-chat",
+      max_tokens = 2000,
+      temperature = 0.7,
+    },
+  },
 }
 
 M.display = {
