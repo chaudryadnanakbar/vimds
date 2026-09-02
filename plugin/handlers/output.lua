@@ -1,71 +1,180 @@
 -- plugin/handlers/output.lua
-local buffer_manager = require("vimds.utils.buffer_manager")
-
 local M = {}
+local config = require("vimds.config")
+local buffer_utils = require("vimds.utils.buffer")
 
+local output_buffer = nil
+local output_window = nil
+
+-- Display output in split window
 function M.display(content, opts)
-    return buffer_manager.display(content, opts)
+  opts = opts or {}
+  
+  -- Close existing output window if open
+  if output_window and vim.api.nvim_win_is_valid(output_window) then
+    vim.api.nvim_win_close(output_window, true)
+  end
+  
+  local split = opts.split or config.output.split or "new"
+  local title = opts.title or config.output.title_prefix .. " Output"
+  local filetype = opts.filetype or config.output.filetype or "markdown"
+  
+  -- Create new split
+  vim.cmd(split)
+  
+  -- Set window size
+  if split == "vnew" and config.output.width then
+    vim.api.nvim_win_set_width(0, config.output.width)
+  elseif split == "new" and config.output.height then
+    vim.api.nvim_win_set_height(0, config.output.height)
+  end
+  
+  local buf = vim.api.nvim_get_current_buf()
+  
+  -- Set buffer options
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = filetype
+  vim.bo[buf].modifiable = true
+  
+  -- Set window options
+  vim.wo.wrap = true
+  vim.wo.number = false
+  vim.wo.relativenumber = false
+  vim.wo.signcolumn = "no"
+  
+  -- Set content
+  local lines = vim.split(content, "\n")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_name(buf, title)
+  
+  -- Make buffer non-modifiable
+  vim.bo[buf].modifiable = false
+  
+  -- Keymap to close
+  local close_key = config.keys.close_output or "q"
+  vim.keymap.set('n', close_key, function()
+    vim.api.nvim_win_close(0, true)
+  end, { buffer = buf, desc = "Close output" })
+  
+  output_window = vim.api.nvim_get_current_win()
+  output_buffer = buf
+  
+  return buf
 end
 
-function M.show_status(status_info)
-    return buffer_manager.show_status(status_info)
+-- Append to existing output
+function M.append(content)
+  if not output_buffer or not vim.api.nvim_buf_is_valid(output_buffer) then
+    M.display(content, { title = config.output.title_prefix .. " Output" })
+    return
+  end
+  
+  vim.bo[output_buffer].modifiable = true
+  local lines = vim.split(content, "\n")
+  vim.api.nvim_buf_set_lines(output_buffer, -1, -1, false, lines)
+  vim.bo[output_buffer].modifiable = false
 end
 
+-- Clear output
 function M.clear()
-    buffer_manager.clear_output()
+  if output_buffer and vim.api.nvim_buf_is_valid(output_buffer) then
+    vim.bo[output_buffer].modifiable = true
+    vim.api.nvim_buf_set_lines(output_buffer, 0, -1, false, {})
+    vim.bo[output_buffer].modifiable = false
+  end
 end
 
+-- Close output
 function M.close()
-    buffer_manager.close_all()
+  if output_window and vim.api.nvim_win_is_valid(output_window) then
+    vim.api.nvim_win_close(output_window, true)
+  end
+  output_buffer = nil
+  output_window = nil
 end
 
+-- Toggle output
+function M.toggle(content, opts)
+  if output_window and vim.api.nvim_win_is_valid(output_window) then
+    M.close()
+  else
+    M.display(content, opts)
+  end
+end
+
+-- Show help
 function M.show_help()
-    local help_content = [[
-# 📚 vimds Help
+  local help_text = [[
+# vimds Help
 
 ## Commands
-
-| Command | Description |
-|---------|-------------|
-| `:LoadVimds` | Load the plugin |
-| `:Vimds` | Toggle plugin on/off |
-| `:VimdsStatus` | Show plugin status |
-| `:VimdsHelp` | Show this help |
-| `:VimdsClear` | Clear output |
-| `:VimdsClose` | Close output |
-| `:Hello` | Say hello |
-| `:Chat` | Open chat buffer |
-| `:ChatSend <msg>` | Send message to chat |
-| `:ChatClear` | Clear chat |
+- :Chat - Open chat buffer
+- :ChatSend <msg> - Send message
+- :ChatClear - Clear chat
+- :ChatHistory - Show history
+- :File - Select and send file
+- :SendVisual - Send visual selection
+- :Vimds - Toggle on/off
+- :VimdsStatus - Show status
 
 ## Keymaps
+- \c or <leader>c - Open chat
+- \f or <leader>f - Select and send file
+- \v or <leader>v - Send visual selection
+- q - Close window
+- Enter - Send line in chat
+- c - Clear chat
 
-| Key | Description |
-|-----|-------------|
-| `\c` | Say hello |
-| `<leader>c` | Say hello (alternative) |
+## Usage Examples
+1. Select text with visual mode, press \v
+2. Press \f to select a file
+3. Type :Chat to start chatting
+]]
+  
+  M.display(help_text, {
+    title = "vimds Help",
+    filetype = "markdown",
+    split = "vnew",
+  })
+end
 
-## Usage
+-- Show status
+function M.show_status(status_info)
+  local status_text = string.format([[
+# vimds Status
 
-1. **Load**: `:LoadVimds`
-2. **Enable**: `:Vimds` (toggles on/off)
-3. **Test**: `\c` or `:Hello`
-4. **Status**: `:VimdsStatus`
-5. **Chat**: `:Chat`
+## Plugin Status
+- Loaded: %s
+- Active: %s
 
-## Configuration
+## Keymaps
+- Chat: %s
+- File: %s
+- Visual: %s
+- Close: %s
 
-Edit `~/.config/nvim/lua/vimds/config.lua`
-
----
-_Press `q` or `<ESC>` to close this buffer_
-    ]]
-    
-    buffer_manager.display(help_content, {
-        title = "vimds Help",
-        split = "botright",
-        size = 20,
-    })
+## Commands
+- :Chat - Open chat
+- :ChatSend <msg> - Send message
+- :File - Select and send file
+- :SendVisual - Send visual selection
+]],
+    status_info.loaded or "No",
+    status_info.active or "No",
+    status_info.chat_key or "\\c",
+    status_info.file_key or "\\f",
+    status_info.visual_key or "\\v",
+    status_info.close_key or "q"
+  )
+  
+  M.display(status_text, {
+    title = "vimds Status",
+    filetype = "markdown",
+    split = "new",
+  })
 end
 
 return M
+
