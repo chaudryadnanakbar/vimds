@@ -1,28 +1,18 @@
 -- plugin/config.lua
 local M = {}
 
--- ============================================
--- General Settings
--- ============================================
 M.general = {
   auto_enable = true,
   show_welcome = true,
   debug = false,
 }
 
--- ============================================
--- Keymaps
--- ============================================
 M.keys = {
-  chat = "<leader>c",        -- Open chat
-  file = "<leader>f",        -- Select file and send to agent
-  visual = "<leader>v",      -- Send visual selection to agent
-  close_output = "q",        -- Close output window
+  chat = "<leader>c",
+  file = "<leader>f",
+  close_output = "q",
 }
 
--- ============================================
--- Output Settings
--- ============================================
 M.output = {
   split = "new",
   filetype = "markdown",
@@ -32,9 +22,6 @@ M.output = {
   height = 20,
 }
 
--- ============================================
--- API Settings
--- ============================================
 M.api = {
   enabled = false,
   port = 8080,
@@ -42,27 +29,18 @@ M.api = {
   auto_start = false,
 }
 
--- ============================================
--- Socket Settings
--- ============================================
 M.socket = {
   enabled = false,
   path = "/tmp/vimds.sock",
   auto_start = false,
 }
 
--- ============================================
--- Agent Settings
--- ============================================
 M.agent = {
   enabled = true,
   default = "chat",
   timeout = 5,
 }
 
--- ============================================
--- Display Settings
--- ============================================
 M.display = {
   show_timestamp = true,
   show_buffer_info = true,
@@ -70,9 +48,6 @@ M.display = {
   compact_mode = false,
 }
 
--- ============================================
--- Advanced Settings
--- ============================================
 M.advanced = {
   lazy_load = true,
   load_command = "LoadVimds",
