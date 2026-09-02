@@ -19,8 +19,8 @@ M.general = {
 -- Keymaps
 -- ============================================
 M.keys = {
-  hello = "\\c",             -- Primary key to show hello (\c)
-  hello_alt = "<leader>c",   -- Alternative key (<leader>c)
+  chat = "\\c",             -- Primary key to show chat split window (\c)
+  attach = "\\f",           --- attach accepts filename to attach
   close_output = "q",        -- Key to close output window
 }
 

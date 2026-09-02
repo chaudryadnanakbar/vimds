@@ -178,7 +178,21 @@ function M.setup()
   vim.api.nvim_create_user_command('VimdsClose', function()
     output_handler.close()
   end, { desc = "Close vimds output" })
-  
+
+  -- Add chat commands
+  vim.api.nvim_create_user_command('Chat', function()
+    M.open_chat()
+  end, { desc = "Open chat buffer" })
+
+  vim.api.nvim_create_user_command('ChatSend', function(opts)
+    M.chat_send(opts.args)
+  end, { desc = "Send message to chat", nargs = "*" })
+
+  vim.api.nvim_create_user_command('ChatClear', function()
+    M.chat_clear()
+  end, { desc = "Clear chat buffer" })
+
+
   -- Start servers if enabled
   start_http_server()
   start_socket_server()
@@ -223,8 +237,14 @@ function M.lazy_load()
       M.toggle()
     end
   end, { desc = "Load and toggle vimds" })
-  
-  print("vimds: Lazy mode - Use :" .. config.advanced.load_command .. " to load")
+  -- NEW OPTION 3: Use vim.notify (modern way, no Enter)
+   -- WITH THIS (no Enter required):
+  vim.api.nvim_echo({
+    { "vimds: Lazy mode - Use :", "Normal" },
+    { config.advanced.load_command, "Special" },
+    { " to load", "Normal" }
+  }, false, {})
+
 end
 
 function M.enable()
@@ -372,6 +392,69 @@ function M.status()
   }
   
   output_handler.show_status(status_info)
+end
+-- ============================================
+-- Chat Commands (Safe Buffer)
+-- ============================================
+
+function M.open_chat()
+    local buffer_manager = require("vimds.utils.buffer_manager")
+    buffer_manager.open_chat()
+    -- Add welcome message if empty
+    local buf = buffer_manager.get_chat_buffer()
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    if #lines <= 3 then
+        buffer_manager.add_chat_message("Welcome to vimds chat! Type :ChatSend <message>", "System")
+    end
+end
+
+function M.chat_send(message)
+    if not message or message == "" then
+        vim.cmd('echo "Please provide a message: :ChatSend <message>"')
+        return
+    end
+    
+    local buffer_manager = require("vimds.utils.buffer_manager")
+    local config = require("vimds.config")
+    
+    -- Add user message
+    buffer_manager.add_chat_message(message, "User")
+    
+    -- If agent is enabled, call it
+    if config.agent and config.agent.enabled then
+        vim.defer_fn(function()
+            local response = M.call_external_agent(message)
+            if response and response ~= "" then
+                buffer_manager.add_chat_message(response, "Assistant")
+            end
+        end, 200)
+    else
+        -- Auto-response
+        vim.defer_fn(function()
+            local responses = {
+                "That's interesting! Tell me more.",
+                "I see. How can I help with that?",
+                "Good point! Let me think about that.",
+                "I understand. What would you like to do?",
+            }
+            local random_response = responses[math.random(#responses)]
+            buffer_manager.add_chat_message(random_response, "Assistant")
+        end, 300)
+    end
+    
+    -- Auto-close any other output windows and show chat
+    vim.defer_fn(function()
+        vim.cmd('VimdsClose')
+        vim.defer_fn(function()
+            M.open_chat()
+        end, 100)
+    end, 50)
+end
+
+function M.chat_clear()
+    local buffer_manager = require("vimds.utils.buffer_manager")
+    buffer_manager.clear_chat()
+    vim.cmd('echo "Chat cleared"')
 end
 
 -- ============================================
