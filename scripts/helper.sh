@@ -368,22 +368,23 @@ generate_docs() {
     DOCS_DIR="$(dirname "$SCRIPT_DIR")/docs"
     mkdir -p "$DOCS_DIR"
     
-    # Generate README.md at the root level (one level above scripts)
+    # Generate README.md at the root level
     cat > "$(dirname "$SCRIPT_DIR")/README.md" << 'EOF'
 # vimds - Neovim Plugin
 
-A modular Neovim plugin with external API support, socket integration, and beautiful output windows.
+A modular Neovim plugin with agent-based architecture, external API support, and beautiful output windows.
 
 ## Features
 
-- Lazy Loading - Loads only when you need it
-- Toggle On/Off - Enable/disable with a single command
-- Split Window Output - Beautiful markdown output in split windows
-- HTTP API Server - Interact with external agents via REST API
-- Socket Server - Unix domain socket for fast IPC
-- Easy Configuration - All settings in one config file
-- Activity Logging - Track all plugin activities
-- Modular Design - Easy to extend and customize
+- 🤖 Agent-Based Architecture - Multiple AI agents (Chat, DeepSeek, OpenAI, Webhook, Custom)
+- 🔄 Lazy Loading - Loads only when you need it
+- 🔌 Toggle On/Off - Enable/disable with a single command
+- 📝 Split Window Output - Beautiful markdown output in split windows
+- 🌐 HTTP API Server - Interact with external agents via REST API
+- 🔌 Socket Server - Unix domain socket for fast IPC
+- ⚙️ Easy Configuration - All settings in one config file
+- 📊 Activity Logging - Track all plugin activities
+- 🎯 Modular Design - Easy to extend and customize
 
 ## Installation
 
@@ -397,61 +398,160 @@ cd scripts
 cp -r plugin ~/.config/nvim/lua/vimds
 echo 'require("vimds")' >> ~/.config/nvim/init.lua
 
+### Using Lazy.nvim
+
+Add to ~/.config/nvim/lua/plugins/vimds.lua:
+
+return {
+  "vimds",
+  lazy = true,
+  cmd = "LoadVimds",
+  config = function()
+    require("vimds")
+  end,
+}
+
 ## Quick Start
 
 1. Load the plugin: :LoadVimds
 2. Toggle on/off: :Vimds
-3. Show hello: \c or :Hello
-4. Get help: :VimdsHelp
-5. Check status: :VimdsStatus
+3. Open chat: :Chat or <leader>c
+4. Send message: :ChatSend Hello
+5. Get help: :VimdsHelp
+6. Check status: :VimdsStatus
+
+## Agents
+
+| Agent | Description |
+|-------|-------------|
+| chat | Simple chat agent with dummy responses |
+| deepseek | DeepSeek AI via OpenRouter API |
+| openai | OpenAI GPT models (requires API key) |
+| webhook | Send messages to a webhook endpoint |
+| custom | Custom API integration |
+
+### Switching Agents
+
+:AgentSwitch deepseek
+:AgentList        " List all available agents
+:AgentStatus      " Show current agent status
+
+### DeepSeek Commands
+
+:DeepSeekReload      " Reload API token from ~/.config/openrouter.token
+:DeepSeekModel       " Change model
+:DeepSeekClear       " Clear conversation history
+:DeepSeekModels      " List available models
+:DeepSeekTimeout     " Set timeout in seconds
 
 ## Commands
 
-:LoadVimds     - Load the plugin
-:Vimds         - Toggle plugin on/off
-:VimdsStatus   - Show plugin status
-:VimdsHelp     - Show help in split window
-:VimdsClear    - Clear output window
-:VimdsClose    - Close output window
-:Hello         - Print hello message
-:Agent         - Call external agent
+| Command | Description |
+|---------|-------------|
+| :LoadVimds | Load the plugin |
+| :Vimds | Toggle plugin on/off |
+| :VimdsStatus | Show plugin status |
+| :VimdsHelp | Show help in split window |
+| :Chat | Open chat buffer |
+| :ChatSend <msg> | Send message to default agent |
+| :ChatClear | Clear chat buffer |
+| :ChatHistory | Show chat history |
+| :File | Select and send file |
+| :SendVisual | Send visual selection with prompt |
+| :SendVisualQuick | Send visual selection without prompt |
+| :AgentList | List all available agents |
+| :AgentSwitch <name> | Switch default agent |
+| :AgentStatus | Show current agent status |
+| :AgentLog | Show agent logs |
+| :AgentLogClear | Clear logs |
+| :AgentLogStatus | Show log status |
 
 ## Keymaps
 
-\c             - Print hello message
-<leader>c      - Print hello message (alternative)
-q              - Close output window
+| Key | Description |
+|-----|-------------|
+| <leader>c | Open chat |
+| <leader>f | Select and send file |
+| <leader>v | Send visual selection (with prompt) |
+| <leader>V | Send visual selection (quick) |
+| gv | Send visual selection (with prompt) |
+| q | Close output window |
 
 ## Configuration
 
 Edit ~/.config/nvim/lua/vimds/config.lua
 
+### Agent Configuration
+
+M.agent = {
+  default = "deepseek",
+  providers = {
+    deepseek = {
+      model = "deepseek/deepseek-chat",
+      max_tokens = 2000,
+      temperature = 0.7,
+    },
+    openai = {
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      model = "gpt-3.5-turbo",
+    },
+    webhook = {
+      url = os.getenv("WEBHOOK_URL") or "",
+      method = "POST",
+    },
+  },
+}
+
+### Logging Settings
+
+M.logging = {
+  enabled = true,
+  level = "info",
+  file = os.getenv("HOME") .. "/.vimds_agent.log",
+}
+
 ## Helper Script Commands
 
-./helper.sh install      - Install the plugin
-./helper.sh update       - Update plugin files
-./helper.sh uninstall    - Uninstall the plugin
-./helper.sh status       - Show plugin status
-./helper.sh docs         - Generate documentation
-./helper.sh logs         - Show logs
-./helper.sh clear-logs   - Clear logs
-./helper.sh help         - Show help
+./helper.sh install      # Install the plugin
+./helper.sh update       # Update plugin files
+./helper.sh uninstall    # Uninstall the plugin
+./helper.sh status       # Show plugin status
+./helper.sh docs         # Generate documentation
+./helper.sh logs         # Show logs
+./helper.sh clear-logs   # Clear logs
+./helper.sh help         # Show help
 
 ## Directory Structure
 
 ./
 ├── scripts/
-│   └── helper.sh        - Management script
-├── plugin/              - Plugin source
-├── docs/                - Generated documentation
-└── README.md            - This file
+│   └── helper.sh        # Management script
+├── plugin/
+│   ├── agents/          # AI agents
+│   │   ├── chat.lua
+│   │   ├── deepseek.lua
+│   │   ├── openai.lua
+│   │   ├── webhook.lua
+│   │   └── custom.lua
+│   ├── handlers/        # Output handlers
+│   ├── utils/           # Utilities (buffer, logger)
+│   ├── config.lua       # Configuration
+│   └── init.lua         # Main plugin
+├── docs/                # Generated documentation
+└── README.md            # This file
+
+## Logging
+
+Logs are stored in ~/.vimds_agent.log
+
+:AgentLog
 
 ## License
 
 MIT License
 EOF
 
-    print_status "README.md generated at $(dirname "$SCRIPT_DIR")/README.md"
+    print_status "README.md generated"
 
     # Generate INSTALL.md
     cat > "$DOCS_DIR/INSTALL.md" << 'EOF'
@@ -460,12 +560,13 @@ EOF
 ## Prerequisites
 
 - Neovim 0.5.0 or higher
-- Git (optional, for cloning)
+- Git (optional)
 - Python 3 (for API server)
+- OpenRouter API key (for DeepSeek agent)
 
 ## Quick Install
 
-### Method 1: Using the Helper Script (Recommended)
+### Method 1: Using the Helper Script
 
 cd scripts
 ./helper.sh install
@@ -484,16 +585,25 @@ return {
   lazy = true,
   cmd = "LoadVimds",
   config = function()
-    require("vimds").setup()
+    require("vimds")
   end,
 }
+
+## DeepSeek Setup
+
+1. Get API key from https://openrouter.ai/keys
+2. Save to ~/.config/openrouter.token:
+
+echo "sk-or-v1-your-key-here" > ~/.config/openrouter.token
+chmod 600 ~/.config/openrouter.token
 
 ## Post-Installation
 
 1. Restart Neovim
-2. Load the plugin: :LoadVimds
-3. Toggle on: :Vimds
-4. Test: \c
+2. :LoadVimds
+3. :Vimds
+4. :Chat
+5. :ChatSend Hello
 
 ## Troubleshooting
 
@@ -502,15 +612,14 @@ return {
 ls ~/.config/nvim/lua/vimds/
 cat ~/.config/nvim/init.lua | grep vimds
 
-### Keymaps not working
+### DeepSeek not working
 
-:VimdsStatus
-:Vimds
+cat ~/.config/openrouter.token
+:DeepSeekReload
 
-### API server not starting
+### Check logs
 
-python3 --version
-netstat -tulpn | grep 8080
+:AgentLog
 
 ## Uninstall
 
@@ -518,15 +627,42 @@ cd scripts
 ./helper.sh uninstall
 EOF
 
-    print_status "INSTALL.md generated in $DOCS_DIR"
+    print_status "INSTALL.md generated"
 
     # Generate CONFIG.md
     cat > "$DOCS_DIR/CONFIG.md" << 'EOF'
 # Configuration Guide
 
-## Overview
-
 All configuration is in ~/.config/nvim/lua/vimds/config.lua
+
+## Agent Configuration
+
+M.agent = {
+  default = "deepseek",
+  providers = {
+    deepseek = {
+      model = "deepseek/deepseek-chat",
+      max_tokens = 2000,
+      temperature = 0.7,
+    },
+    openai = {
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      model = "gpt-3.5-turbo",
+    },
+    webhook = {
+      url = os.getenv("WEBHOOK_URL") or "",
+      method = "POST",
+    },
+  },
+}
+
+## Logging Settings
+
+M.logging = {
+  enabled = true,
+  level = "info",
+  file = os.getenv("HOME") .. "/.vimds_agent.log",
+}
 
 ## General Settings
 
@@ -539,8 +675,8 @@ M.general = {
 ## Keymaps
 
 M.keys = {
-  hello = "\\c",
-  hello_alt = "<leader>c",
+  chat = "<leader>c",
+  file = "<leader>f",
   close_output = "q",
 }
 
@@ -555,110 +691,150 @@ M.output = {
   height = 20,
 }
 
-## HTTP API Settings
+## Environment Variables
 
-M.api = {
-  enabled = false,
-  port = 8080,
-  host = "127.0.0.1",
-  auto_start = false,
+| Variable | Description |
+|----------|-------------|
+| OPENAI_API_KEY | OpenAI API key |
+| WEBHOOK_URL | Webhook endpoint URL |
+| CUSTOM_API_URL | Custom API URL |
+
+## Examples
+
+### Use OpenAI
+
+M.agent = {
+  default = "openai",
+  providers = {
+    openai = {
+      api_key = "sk-...",
+      model = "gpt-4",
+    },
+  },
 }
 
-## Socket Settings
+### Use Webhook
 
-M.socket = {
-  enabled = false,
-  path = "/tmp/vimds.sock",
-  auto_start = false,
+M.agent = {
+  default = "webhook",
+  providers = {
+    webhook = {
+      url = "https://my-service.com/chat",
+      method = "POST",
+    },
+  },
 }
-
-## Example Configurations
-
-### Minimal Config
-
-local M = {}
-M.keys = { hello = "<F2>" }
-M.api = { enabled = true, port = 8080 }
-return M
 EOF
 
-    print_status "CONFIG.md generated in $DOCS_DIR"
+    print_status "CONFIG.md generated"
 
     # Generate API.md
     cat > "$DOCS_DIR/API.md" << 'EOF'
 # API Documentation
 
-## HTTP API Endpoints
+## Agent Interface
+
+function agent.call(payload)
+  -- Input: { message = string, context = table, timestamp = string }
+  -- Output: { success = bool, response = string, provider = string }
+end
+
+function agent.help()
+  -- Output: { name = string, description = string, config = table }
+end
+
+## HTTP API
 
 ### GET /hello
-Returns a hello message.
 
 curl http://localhost:8080/hello
 
 Response: {"message": "Hello from vimds!"}
 
-### GET /status
-Returns plugin status.
-
-curl http://localhost:8080/status
-
-Response: {"status": "active", "plugin": "vimds"}
-
 ### POST /hello
-Send a message with a name.
 
-curl -X POST -H "Content-Type: application/json" -d '{"name":"World"}' http://localhost:8080/hello
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"World"}' \
+  http://localhost:8080/hello
 
 Response: {"message": "Hello World"}
 
 ## Socket API
 
 ### hello command
+
 echo "hello" | socat - UNIX-CONNECT:/tmp/vimds.sock
-Response: {"message": "Hello from vimds socket!"}
 
 ### status command
+
 echo "status" | socat - UNIX-CONNECT:/tmp/vimds.sock
-Response: {"status": "active", "plugin": "vimds"}
 
 ## Neovim API
 
-require("vimds").setup()           - Initialize the plugin
-require("vimds").enable()          - Enable the plugin
-require("vimds").disable()         - Disable the plugin
-require("vimds").toggle()          - Toggle plugin on/off
-require("vimds").hello()           - Print hello message
-require("vimds").status()          - Show plugin status
+require("vimds")              -- Load plugin
+require("vimds").setup()      -- Initialize
+require("vimds").enable()     -- Enable
+require("vimds").disable()    -- Disable
+require("vimds").toggle()     -- Toggle
+require("vimds").status()     -- Show status
+
+## Agent Manager
+
+local manager = require("vimds.agents")
+manager.register("name", agent)
+manager.set_default("name")
+manager.get_default()
+manager.list()
+manager.call("name", message)
+manager.call_default(message)
+
+## Logger
+
+local logger = require("vimds.utils.logger")
+logger.debug("msg", data)
+logger.info("msg", data)
+logger.warn("msg", data)
+logger.error("msg", data)
 EOF
 
-    print_status "API.md generated in $DOCS_DIR"
+    print_status "API.md generated"
 
     # Generate CHANGELOG.md
     cat > "$DOCS_DIR/CHANGELOG.md" << 'EOF'
 # Changelog
 
-## [1.0.0] - 2024-01-15
+## [1.0.0] - 2026-09-02
 
 ### Added
 - Initial release
-- Lazy loading support
-- Toggle on/off functionality
-- Split window output
+- Agent-based architecture
+- DeepSeek AI integration
+- OpenAI GPT integration
+- Webhook support
+- Custom API support
+- Chat interface
+- File and visual selection
+- Activity logging
 - HTTP API server
 - Socket server
 - Configuration system
-- Activity logging
-- Documentation generation
 
-### Features
-- Modular design with handlers and utilities
-- Markdown output in split windows
-- External agent integration
-- Command system with custom commands
-- Keymap system with configurable keys
+### Commands
+- :Chat, :ChatSend, :ChatClear, :ChatHistory
+- :AgentList, :AgentSwitch, :AgentStatus
+- :AgentLog, :AgentLogClear, :AgentLogStatus
+- :DeepSeekReload, :DeepSeekModel, :DeepSeekClear
+
+## [0.9.0] - 2026-08-15
+
+### Added
+- Basic plugin structure
+- Dummy chat agent
+- Split window output
+- Keymaps
 EOF
 
-    print_status "CHANGELOG.md generated in $DOCS_DIR"
+    print_status "CHANGELOG.md generated"
 
     # Summary
     echo ""
@@ -672,8 +848,9 @@ EOF
     echo ""
     print_status "All documentation generated successfully!"
     
-    log_activity "Generated documentation in $(dirname "$SCRIPT_DIR")/docs"
+    log_activity "Generated documentation"
 }
+
 
 # ============================================
 # Main script

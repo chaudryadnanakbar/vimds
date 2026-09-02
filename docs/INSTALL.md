@@ -3,12 +3,13 @@
 ## Prerequisites
 
 - Neovim 0.5.0 or higher
-- Git (optional, for cloning)
+- Git (optional)
 - Python 3 (for API server)
+- OpenRouter API key (for DeepSeek agent)
 
 ## Quick Install
 
-### Method 1: Using the Helper Script (Recommended)
+### Method 1: Using the Helper Script
 
 cd scripts
 ./helper.sh install
@@ -27,16 +28,25 @@ return {
   lazy = true,
   cmd = "LoadVimds",
   config = function()
-    require("vimds").setup()
+    require("vimds")
   end,
 }
+
+## DeepSeek Setup
+
+1. Get API key from https://openrouter.ai/keys
+2. Save to ~/.config/openrouter.token:
+
+echo "sk-or-v1-your-key-here" > ~/.config/openrouter.token
+chmod 600 ~/.config/openrouter.token
 
 ## Post-Installation
 
 1. Restart Neovim
-2. Load the plugin: :LoadVimds
-3. Toggle on: :Vimds
-4. Test: \c
+2. :LoadVimds
+3. :Vimds
+4. :Chat
+5. :ChatSend Hello
 
 ## Troubleshooting
 
@@ -45,15 +55,14 @@ return {
 ls ~/.config/nvim/lua/vimds/
 cat ~/.config/nvim/init.lua | grep vimds
 
-### Keymaps not working
+### DeepSeek not working
 
-:VimdsStatus
-:Vimds
+cat ~/.config/openrouter.token
+:DeepSeekReload
 
-### API server not starting
+### Check logs
 
-python3 --version
-netstat -tulpn | grep 8080
+:AgentLog
 
 ## Uninstall
 

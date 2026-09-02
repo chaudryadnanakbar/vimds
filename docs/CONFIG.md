@@ -1,8 +1,35 @@
 # Configuration Guide
 
-## Overview
-
 All configuration is in ~/.config/nvim/lua/vimds/config.lua
+
+## Agent Configuration
+
+M.agent = {
+  default = "deepseek",
+  providers = {
+    deepseek = {
+      model = "deepseek/deepseek-chat",
+      max_tokens = 2000,
+      temperature = 0.7,
+    },
+    openai = {
+      api_key = os.getenv("OPENAI_API_KEY") or "",
+      model = "gpt-3.5-turbo",
+    },
+    webhook = {
+      url = os.getenv("WEBHOOK_URL") or "",
+      method = "POST",
+    },
+  },
+}
+
+## Logging Settings
+
+M.logging = {
+  enabled = true,
+  level = "info",
+  file = os.getenv("HOME") .. "/.vimds_agent.log",
+}
 
 ## General Settings
 
@@ -15,8 +42,8 @@ M.general = {
 ## Keymaps
 
 M.keys = {
-  hello = "\\c",
-  hello_alt = "<leader>c",
+  chat = "<leader>c",
+  file = "<leader>f",
   close_output = "q",
 }
 
@@ -31,28 +58,36 @@ M.output = {
   height = 20,
 }
 
-## HTTP API Settings
+## Environment Variables
 
-M.api = {
-  enabled = false,
-  port = 8080,
-  host = "127.0.0.1",
-  auto_start = false,
+| Variable | Description |
+|----------|-------------|
+| OPENAI_API_KEY | OpenAI API key |
+| WEBHOOK_URL | Webhook endpoint URL |
+| CUSTOM_API_URL | Custom API URL |
+
+## Examples
+
+### Use OpenAI
+
+M.agent = {
+  default = "openai",
+  providers = {
+    openai = {
+      api_key = "sk-...",
+      model = "gpt-4",
+    },
+  },
 }
 
-## Socket Settings
+### Use Webhook
 
-M.socket = {
-  enabled = false,
-  path = "/tmp/vimds.sock",
-  auto_start = false,
+M.agent = {
+  default = "webhook",
+  providers = {
+    webhook = {
+      url = "https://my-service.com/chat",
+      method = "POST",
+    },
+  },
 }
-
-## Example Configurations
-
-### Minimal Config
-
-local M = {}
-M.keys = { hello = "<F2>" }
-M.api = { enabled = true, port = 8080 }
-return M
