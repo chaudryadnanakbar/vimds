@@ -176,4 +176,4 @@ Logs are stored in ~/.vimds_agent.log
 
 ## License
 
-MIT License
+MIT License Not sure what it is
